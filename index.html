@@ -250,7 +250,7 @@
         .home-btn {
             position: fixed;
             top: 20px;
-            right: 20px;
+            left: 20px;
             background: linear-gradient(135deg, #27ae60 0%, #229954 100%);
             color: white;
             border: none;
@@ -760,12 +760,16 @@
             
             <div style="text-align: center; margin: 30px 0;">
                 <button class="btn" onclick="performSearch()">🔍 Cerca</button>
+                <button class="btn" onclick="showAllDeliveriesInSearch()">📋 Mostra tutte le consegne</button>
                 <button class="btn warning" onclick="clearSearch()">🗑️ Pulisci</button>
             </div>
             
             <div id="search-results" class="table-container" style="display: none;">
                 <h3>Risultati della ricerca:</h3>
                 <div id="search-results-content"></div>
+                <div id="search-actions" style="display: none; margin-top: 20px;">
+                    <button class="btn danger" onclick="deleteSelectedDeliveries()">🗑️ Cancella selezionate</button>
+                </div>
             </div>
         </div>
 
@@ -1948,6 +1952,103 @@
             }
             
             document.getElementById('search-results').style.display = 'block';
+            document.getElementById('search-actions').style.display = 'none';
+        }
+
+        function showAllDeliveriesInSearch() {
+            const deliveries = JSON.parse(localStorage.getItem('consegne')) || [];
+            const dpiList = JSON.parse(localStorage.getItem('dpi')) || [];
+            const content = document.getElementById('search-results-content');
+            
+            if (deliveries.length === 0) {
+                content.innerHTML = '<p>Nessuna consegna trovata.</p>';
+                document.getElementById('search-results').style.display = 'block';
+                document.getElementById('search-actions').style.display = 'none';
+                return;
+            }
+            
+            let html = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th><input type="checkbox" id="select-all-search" onclick="toggleSelectAllSearch()"></th>
+                            <th>Lavoratore</th>
+                            <th>DPI</th>
+                            <th>Cod.SAP</th>
+                            <th>Quantità</th>
+                            <th>Data</th>
+                            <th>Motivo</th>
+                            <th>Firma Preposto</th>
+                            <th>Firma Lavoratore</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+            
+            deliveries.forEach((delivery, index) => {
+                const firmaPreposto = delivery.firmaPreposto ? `<img src="${delivery.firmaPreposto}" class="signature-preview" alt="Firma Preposto">` : '-';
+                const firmaLavoratore = delivery.firmaLavoratore ? `<img src="${delivery.firmaLavoratore}" class="signature-preview" alt="Firma Lavoratore">` : '-';
+                
+                // Trova il codice SAP del DPI
+                const dpi = dpiList.find(d => d.nome === (delivery.dpiText || delivery.dpi));
+                const codiceSAP = dpi ? dpi.sap : 'N/A';
+                
+                html += `
+                    <tr>
+                        <td><input type="checkbox" class="delivery-checkbox-search" data-index="${index}"></td>
+                        <td>${delivery.lavoratoreText || delivery.lavoratore}</td>
+                        <td>${delivery.dpiText || delivery.dpi}</td>
+                        <td>${codiceSAP}</td>
+                        <td>${delivery.quantita}</td>
+                        <td>${delivery.data}</td>
+                        <td>${getReasonText(delivery.motivo)}</td>
+                        <td>${firmaPreposto}</td>
+                        <td>${firmaLavoratore}</td>
+                    </tr>
+                `;
+            });
+            
+            html += '</tbody></table>';
+            content.innerHTML = html;
+            document.getElementById('search-results').style.display = 'block';
+            document.getElementById('search-actions').style.display = 'block';
+        }
+
+        function toggleSelectAllSearch() {
+            const selectAll = document.getElementById('select-all-search');
+            const checkboxes = document.querySelectorAll('.delivery-checkbox-search');
+            
+            checkboxes.forEach(checkbox => {
+                checkbox.checked = selectAll.checked;
+            });
+        }
+
+        function getSelectedDeliveryIndexes() {
+            const indexes = [];
+            document.querySelectorAll('.delivery-checkbox-search:checked').forEach(checkbox => {
+                indexes.push(parseInt(checkbox.getAttribute('data-index')));
+            });
+            return indexes;
+        }
+
+        function deleteSelectedDeliveries() {
+            const selectedIndexes = getSelectedDeliveryIndexes();
+            
+            if (selectedIndexes.length === 0) {
+                alert('Seleziona almeno una consegna da cancellare!');
+                return;
+            }
+            
+            if (confirm(`Sei sicuro di voler cancellare ${selectedIndexes.length} consegna/e selezionata/e?`)) {
+                const deliveries = JSON.parse(localStorage.getItem('consegne')) || [];
+                // Rimuovi in ordine decrescente per evitare problemi con gli indici
+                selectedIndexes.sort((a, b) => b - a).forEach(index => {
+                    deliveries.splice(index, 1);
+                });
+                localStorage.setItem('consegne', JSON.stringify(deliveries));
+                showAllDeliveriesInSearch();
+                alert('Consegne cancellate con successo!');
+            }
         }
 
         function displayWorkersResults(results) {
@@ -2067,6 +2168,7 @@
         function clearSearch() {
             document.getElementById('search-term').value = '';
             document.getElementById('search-results').style.display = 'none';
+            document.getElementById('search-actions').style.display = 'none';
         }
 
         // Funzioni per le impostazioni
