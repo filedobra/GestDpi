@@ -970,11 +970,12 @@
                                 <th>Motivo</th>
                                 <th>Firma Preposto</th>
                                 <th>Firma Lavoratore</th>
+                                <th>Azioni</th>
                             </tr>
                         </thead>
                         <tbody id="delivery-preview-content">
                             <tr>
-                                <td colspan="9">Seleziona un lavoratore o clicca "Mostra tutte le consegne" per visualizzare le consegne.</td>
+                                <td colspan="10">Seleziona un lavoratore o clicca "Mostra tutte le consegne" per visualizzare le consegne.</td>
                             </tr>
                         </tbody>
                     </table>
@@ -2064,6 +2065,9 @@
                         <td>${getReasonText(delivery.motivo)}</td>
                         <td>${firmaPreposto}</td>
                         <td>${firmaLavoratore}</td>
+                        <td>
+                            <button class="btn danger" onclick="deleteDelivery('${delivery.id}')" title="Elimina consegna">🗑️</button>
+                        </td>
                     </tr>
                 `;
             });
@@ -2079,7 +2083,36 @@
         function clearDeliveryPreview() {
             const previewContent = document.getElementById('delivery-preview-content');
             if (previewContent) {
-                previewContent.innerHTML = '<tr><td colspan="9">Seleziona un lavoratore o clicca "Mostra tutte le consegne" per visualizzare le consegne.</td></tr>';
+                previewContent.innerHTML = '<tr><td colspan="10">Seleziona un lavoratore o clicca "Mostra tutte le consegne" per visualizzare le consegne.</td></tr>';
+            }
+        }
+
+        // Delete delivery function
+        async function deleteDelivery(deliveryId) {
+            if (!deliveryId) {
+                alert('ID consegna non valido');
+                return;
+            }
+
+            if (!confirm('Sei sicuro di voler eliminare questa consegna? Questa operazione non può essere annullata.')) {
+                return;
+            }
+
+            try {
+                // Remove from Firebase
+                await removeFromFirebase(`consegne/${deliveryId}`);
+                
+                // Remove from local data
+                deliveriesData = deliveriesData.filter(delivery => delivery.id !== deliveryId);
+                
+                // Refresh the display
+                showAllDeliveries();
+                
+                alert('Consegna eliminata con successo!');
+                
+            } catch (error) {
+                console.error('Error deleting delivery:', error);
+                alert('Errore durante l\'eliminazione della consegna: ' + error.message);
             }
         }
 
