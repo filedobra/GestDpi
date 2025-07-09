@@ -5,6 +5,60 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gestione DPI</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    
+    <!-- Firebase SDK -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.11.0/firebase-app.js";
+        import { getDatabase, ref, set, get, push, remove, onValue, off } from "https://www.gstatic.com/firebasejs/10.11.0/firebase-database.js";
+        import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.11.0/firebase-storage.js";
+
+        // Firebase configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyC-qpMuEx6OF0F1AfWJUF066IBR10z4a2k",
+            authDomain: "gestionedpi-ae91b.firebaseapp.com",
+            projectId: "gestionedpi-ae91b",
+            storageBucket: "gestionedpi-ae91b.appspot.com",
+            messagingSenderId: "976806063374",
+            appId: "1:976806063374:web:ca48463542dd372d60bb5f",
+            databaseURL: "https://gestionedpi-ae91b-default-rtdb.firebaseio.com/"
+        };
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const database = getDatabase(app);
+        const storage = getStorage(app);
+
+        // Make Firebase functions globally available
+        window.firebaseDB = {
+            database,
+            ref,
+            set,
+            get,
+            push,
+            remove,
+            onValue,
+            off
+        };
+
+        window.firebaseStorage = {
+            storage,
+            storageRef,
+            uploadBytes,
+            getDownloadURL
+        };
+
+        // Initialize the app after Firebase is loaded
+        window.addEventListener('load', function() {
+            if (typeof initializeApp !== 'undefined') {
+                console.log('Firebase initialized successfully');
+                // Initialize real-time listeners
+                initializeRealtimeListeners();
+                // Load initial data
+                loadInitialData();
+            }
+        });
+    </script>
+    
     <style>
         :root {
             --bg-primary: #667eea;
@@ -77,6 +131,38 @@
         .header p {
             font-size: 1.2em;
             opacity: 0.9;
+        }
+
+        .sync-status {
+            position: absolute;
+            top: 20px;
+            right: 80px;
+            background: rgba(255, 255, 255, 0.2);
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .sync-indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #27ae60;
+            animation: pulse 2s infinite;
+        }
+
+        .sync-indicator.offline {
+            background: #e74c3c;
+            animation: none;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
         }
 
         .nav-grid {
@@ -366,12 +452,6 @@
             padding: 20px;
         }
 
-        .signature-preview {
-            max-width: 100px;
-            max-height: 50px;
-            border: 1px solid #ddd;
-        }
-
         .theme-toggle {
             position: absolute;
             top: 20px;
@@ -391,7 +471,6 @@
             transform: scale(1.1);
         }
 
-        /* Nuovi stili aggiunti per le modifiche */
         .search-worker-container {
             position: relative;
         }
@@ -459,9 +538,13 @@
 <body>
     <div class="container">
         <div class="header">
+            <div class="sync-status">
+                <div class="sync-indicator" id="sync-indicator"></div>
+                <span id="sync-text">Sincronizzato</span>
+            </div>
             <button class="theme-toggle" onclick="toggleTheme()" title="Cambia tema">🌙</button>
             <h1>🛡️ Gestione DPI</h1>
-            <p>Sistema di Gestione Dispositivi di Protezione Individuale</p>
+            <p>Sistema di Gestione Dispositivi di Protezione Individuale - Sincronizzazione in tempo reale</p>
         </div>
 
         <!-- Home Section -->
@@ -860,7 +943,7 @@
             
             <div style="text-align: center; margin: 30px 0;">
                 <button class="btn" onclick="showAllDeliveries()">📋 Mostra tutte le consegne</button>
-                <button class="btn" onclick="anteprimaPDF('consegne')">📄 Anteprima Consegne DPI</button>
+                <button class="btn" onclick="anteprimaPDF('consegne')">📄 Anteprima PDF Consegne</button>
                 <button class="btn" onclick="anteprimaPDF('lavoratori')">👥 Stampa Elenco Lavoratori</button>
                 <button class="btn" onclick="anteprimaPDF('dpi')">🦺 Stampa Elenco DPI</button>
                 <button class="btn danger" onclick="clearDeliveryPreview()">🗑️ Pulisci Anteprima</button>
@@ -922,129 +1005,1484 @@
         let selectedDPIIndex = -1;
         let hasSignedPreposto = false;
         let hasSignedLavoratore = false;
+        let isOnline = true;
+        let workersData = [];
+        let dpiData = [];
+        let deliveriesData = [];
+        let settingsData = {};
 
-        // Funzioni per la gestione del tema
-        function initTheme() {
-            const savedTheme = localStorage.getItem('theme') || 'light';
-            document.documentElement.setAttribute('data-theme', savedTheme);
-            updateThemeToggle(savedTheme);
+        // Firebase helper functions
+        function saveToFirebase(path, data) {
+            if (!window.firebaseDB) {
+                console.error('Firebase not initialized');
+                return Promise.reject('Firebase not initialized');
+            }
             
-            // Aggiorna il checkbox nelle impostazioni
-            const darkModeToggle = document.getElementById('dark-mode-toggle');
-            if (darkModeToggle) {
-                darkModeToggle.checked = savedTheme === 'dark';
+            const { database, ref, set } = window.firebaseDB;
+            return set(ref(database, path), data);
+        }
+
+        function getFromFirebase(path) {
+            if (!window.firebaseDB) {
+                console.error('Firebase not initialized');
+                return Promise.reject('Firebase not initialized');
+            }
+            
+            const { database, ref, get } = window.firebaseDB;
+            return get(ref(database, path));
+        }
+
+        function pushToFirebase(path, data) {
+            if (!window.firebaseDB) {
+                console.error('Firebase not initialized');
+                return Promise.reject('Firebase not initialized');
+            }
+            
+            const { database, ref, push } = window.firebaseDB;
+            return push(ref(database, path), data);
+        }
+
+        function removeFromFirebase(path) {
+            if (!window.firebaseDB) {
+                console.error('Firebase not initialized');
+                return Promise.reject('Firebase not initialized');
+            }
+            
+            const { database, ref, remove } = window.firebaseDB;
+            return remove(ref(database, path));
+        }
+
+        function listenToFirebase(path, callback) {
+            if (!window.firebaseDB) {
+                console.error('Firebase not initialized');
+                return;
+            }
+            
+            const { database, ref, onValue } = window.firebaseDB;
+            return onValue(ref(database, path), callback);
+        }
+
+        // Initialize real-time listeners
+        function initializeRealtimeListeners() {
+            // Listen to workers changes
+            listenToFirebase('lavoratori', (snapshot) => {
+                if (snapshot.exists()) {
+                    const data = snapshot.val();
+                    workersData = Object.keys(data).map(key => ({ id: key, ...data[key] }));
+                    updateWorkersTable();
+                    updateWorkersDropdowns();
+                } else {
+                    workersData = [];
+                    updateWorkersTable();
+                    updateWorkersDropdowns();
+                }
+            });
+
+            // Listen to DPI changes
+            listenToFirebase('dpi', (snapshot) => {
+                if (snapshot.exists()) {
+                    const data = snapshot.val();
+                    dpiData = Object.keys(data).map(key => ({ id: key, ...data[key] }));
+                    updateDPITable();
+                    updateDPIDropdowns();
+                } else {
+                    dpiData = [];
+                    updateDPITable();
+                    updateDPIDropdowns();
+                }
+            });
+
+            // Listen to deliveries changes
+            listenToFirebase('consegne', (snapshot) => {
+                if (snapshot.exists()) {
+                    const data = snapshot.val();
+                    deliveriesData = Object.keys(data).map(key => ({ id: key, ...data[key] }));
+                } else {
+                    deliveriesData = [];
+                }
+            });
+
+            // Listen to settings changes
+            listenToFirebase('appSettings', (snapshot) => {
+                if (snapshot.exists()) {
+                    settingsData = snapshot.val();
+                    updateSettingsUI();
+                }
+            });
+
+            updateSyncStatus(true);
+        }
+
+        // Load initial data
+        async function loadInitialData() {
+            try {
+                // Load workers
+                const workersSnapshot = await getFromFirebase('lavoratori');
+                if (workersSnapshot.exists()) {
+                    const data = workersSnapshot.val();
+                    workersData = Object.keys(data).map(key => ({ id: key, ...data[key] }));
+                }
+
+                // Load DPI
+                const dpiSnapshot = await getFromFirebase('dpi');
+                if (dpiSnapshot.exists()) {
+                    const data = dpiSnapshot.val();
+                    dpiData = Object.keys(data).map(key => ({ id: key, ...data[key] }));
+                }
+
+                // Load deliveries
+                const deliveriesSnapshot = await getFromFirebase('consegne');
+                if (deliveriesSnapshot.exists()) {
+                    const data = deliveriesSnapshot.val();
+                    deliveriesData = Object.keys(data).map(key => ({ id: key, ...data[key] }));
+                }
+
+                // Load settings
+                const settingsSnapshot = await getFromFirebase('appSettings');
+                if (settingsSnapshot.exists()) {
+                    settingsData = settingsSnapshot.val();
+                }
+
+                // Update UI
+                updateWorkersTable();
+                updateDPITable();
+                updateWorkersDropdowns();
+                updateDPIDropdowns();
+                updateSettingsUI();
+
+            } catch (error) {
+                console.error('Error loading initial data:', error);
             }
         }
 
-        function toggleTheme() {
-            const currentTheme = document.documentElement.getAttribute('data-theme');
-            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+        // Update sync status
+        function updateSyncStatus(online) {
+            isOnline = online;
+            const indicator = document.getElementById('sync-indicator');
+            const text = document.getElementById('sync-text');
             
-            document.documentElement.setAttribute('data-theme', newTheme);
-            localStorage.setItem('theme', newTheme);
-            updateThemeToggle(newTheme);
-            
-            // Aggiorna il checkbox nelle impostazioni
-            const darkModeToggle = document.getElementById('dark-mode-toggle');
-            if (darkModeToggle) {
-                darkModeToggle.checked = newTheme === 'dark';
+            if (online) {
+                indicator.classList.remove('offline');
+                text.textContent = 'Sincronizzato';
+            } else {
+                indicator.classList.add('offline');
+                text.textContent = 'Offline';
             }
         }
 
-        function toggleDarkMode() {
-            const darkModeToggle = document.getElementById('dark-mode-toggle');
-            const newTheme = darkModeToggle.checked ? 'dark' : 'light';
+        // Update functions for real-time sync
+        function updateWorkersTable() {
+            const tbody = document.getElementById('workers-table-body');
+            if (!tbody) return;
             
-            document.documentElement.setAttribute('data-theme', newTheme);
-            localStorage.setItem('theme', newTheme);
-            updateThemeToggle(newTheme);
+            tbody.innerHTML = '';
+            workersData.forEach((worker) => {
+                const row = tbody.insertRow();
+                row.innerHTML = `
+                    <td>${worker.nome}</td>
+                    <td>${worker.cognome}</td>
+                    <td>${worker.matricola}</td>
+                    <td>${worker.reparto || '-'}</td>
+                    <td>${worker.mansione || '-'}</td>
+                    <td>
+                        <button class="btn warning" onclick="selectWorker('${worker.id}')">✏️</button>
+                        <button class="btn danger" onclick="removeWorker('${worker.id}')">🗑️</button>
+                    </td>
+                `;
+            });
         }
 
-        function updateThemeToggle(theme) {
-            const themeToggle = document.querySelector('.theme-toggle');
-            if (themeToggle) {
-                themeToggle.textContent = theme === 'dark' ? '☀️' : '🌙';
-                themeToggle.title = theme === 'dark' ? 'Modalità chiara' : 'Modalità scura';
+        function updateDPITable() {
+            const tbody = document.getElementById('dpi-table-body');
+            if (!tbody) return;
+            
+            tbody.innerHTML = '';
+            dpiData.forEach((dpi) => {
+                const row = tbody.insertRow();
+                row.innerHTML = `
+                    <td>${dpi.nome}</td>
+                    <td>${dpi.sap}</td>
+                    <td>${dpi.categoria}</td>
+                    <td>${dpi.scadenza || '-'}</td>
+                    <td>${dpi.note || '-'}</td>
+                    <td>
+                        <button class="btn warning" onclick="selectDPI('${dpi.id}')">✏️</button>
+                        <button class="btn danger" onclick="removeDPI('${dpi.id}')">🗑️</button>
+                    </td>
+                `;
+            });
+        }
+
+        function updateWorkersDropdowns() {
+            // Update delivery dropdown
+            const selectLavoratore = document.getElementById('select-lavoratore');
+            if (selectLavoratore) {
+                selectLavoratore.innerHTML = '<option value="">Seleziona lavoratore</option>';
+                workersData.forEach(worker => {
+                    const option = document.createElement('option');
+                    option.value = worker.matricola;
+                    option.textContent = `${worker.cognome} ${worker.nome} (${worker.matricola})`;
+                    selectLavoratore.appendChild(option);
+                });
+            }
+
+            // Update print dropdown
+            const selectLavoratoreStampa = document.getElementById('select-lavoratore-stampa');
+            if (selectLavoratoreStampa) {
+                selectLavoratoreStampa.innerHTML = '<option value="">Seleziona lavoratore</option>';
+                workersData.forEach(worker => {
+                    const option = document.createElement('option');
+                    option.value = worker.matricola;
+                    option.textContent = `${worker.cognome} ${worker.nome} (${worker.matricola})`;
+                    selectLavoratoreStampa.appendChild(option);
+                });
+            }
+
+            // Update departments dropdown
+            updateDepartmentsDropdown();
+        }
+
+        function updateDPIDropdowns() {
+            const selectDPI = document.getElementById('select-dpi');
+            if (selectDPI) {
+                selectDPI.innerHTML = '<option value="">Seleziona DPI</option>';
+                dpiData.forEach(dpi => {
+                    const option = document.createElement('option');
+                    option.value = dpi.sap;
+                    option.textContent = `${dpi.nome} (${dpi.sap})`;
+                    selectDPI.appendChild(option);
+                });
             }
         }
 
-        // Funzioni di utilità
-        function showSection(sectionId) {
-            // Nascondi tutte le sezioni
-            const sections = document.querySelectorAll('.section');
-            sections.forEach(section => section.classList.remove('active'));
+        function updateDepartmentsDropdown() {
+            const selectReparto = document.getElementById('select-reparto');
+            if (selectReparto) {
+                const departments = [...new Set(workersData.map(w => w.reparto).filter(r => r))];
+                selectReparto.innerHTML = '<option value="tutti">Tutti i reparti</option>';
+                departments.forEach(dept => {
+                    const option = document.createElement('option');
+                    option.value = dept;
+                    option.textContent = dept;
+                    selectReparto.appendChild(option);
+                });
+            }
+        }
+
+        function updateSettingsUI() {
+            if (settingsData.companyName) {
+                const companyNameInput = document.getElementById('company-name');
+                if (companyNameInput) companyNameInput.value = settingsData.companyName;
+            }
             
-            // Mostra la sezione selezionata
-            document.getElementById(sectionId).classList.add('active');
+            if (settingsData.useLogoOnPrint !== undefined) {
+                const useLogoInput = document.getElementById('use-logo-print');
+                if (useLogoInput) useLogoInput.checked = settingsData.useLogoOnPrint;
+            }
+        }
+
+        // Worker management functions
+        async function addWorker() {
+            const nome = document.getElementById('nome').value.trim();
+            const cognome = document.getElementById('cognome').value.trim();
+            const matricola = document.getElementById('matricola').value.trim();
+            const reparto = document.getElementById('reparto').value.trim();
+            const mansione = document.getElementById('mansione').value.trim();
             
-            // Inizializza la sezione specifica
-            switch(sectionId) {
-                case 'lavoratori-section':
-                    loadWorkers();
+            if (!nome || !cognome || !matricola) {
+                alert('Nome, cognome e matricola sono obbligatori!');
+                return;
+            }
+            
+            try {
+                // Check if matricola already exists
+                if (workersData.some(w => w.matricola === matricola)) {
+                    alert('Matricola già esistente!');
+                    return;
+                }
+                
+                const newWorker = { nome, cognome, matricola, reparto, mansione };
+                await pushToFirebase('lavoratori', newWorker);
+                
+                // Clear form
+                document.getElementById('nome').value = '';
+                document.getElementById('cognome').value = '';
+                document.getElementById('matricola').value = '';
+                document.getElementById('reparto').value = '';
+                document.getElementById('mansione').value = '';
+                
+                alert('Lavoratore aggiunto con successo!');
+            } catch (error) {
+                console.error('Error adding worker:', error);
+                alert('Errore durante l\'aggiunta del lavoratore');
+            }
+        }
+
+        async function selectWorker(workerId) {
+            const worker = workersData.find(w => w.id === workerId);
+            if (worker) {
+                document.getElementById('nome').value = worker.nome;
+                document.getElementById('cognome').value = worker.cognome;
+                document.getElementById('matricola').value = worker.matricola;
+                document.getElementById('reparto').value = worker.reparto || '';
+                document.getElementById('mansione').value = worker.mansione || '';
+                selectedWorkerIndex = workerId;
+            }
+        }
+
+        async function editWorker() {
+            if (selectedWorkerIndex === -1) {
+                alert('Seleziona un lavoratore da modificare!');
+                return;
+            }
+
+            const nome = document.getElementById('nome').value.trim();
+            const cognome = document.getElementById('cognome').value.trim();
+            const matricola = document.getElementById('matricola').value.trim();
+            const reparto = document.getElementById('reparto').value.trim();
+            const mansione = document.getElementById('mansione').value.trim();
+            
+            if (!nome || !cognome || !matricola) {
+                alert('Nome, cognome e matricola sono obbligatori!');
+                return;
+            }
+
+            try {
+                const updatedWorker = { nome, cognome, matricola, reparto, mansione };
+                await saveToFirebase(`lavoratori/${selectedWorkerIndex}`, updatedWorker);
+                
+                // Clear form and selection
+                document.getElementById('nome').value = '';
+                document.getElementById('cognome').value = '';
+                document.getElementById('matricola').value = '';
+                document.getElementById('reparto').value = '';
+                document.getElementById('mansione').value = '';
+                selectedWorkerIndex = -1;
+                
+                alert('Lavoratore modificato con successo!');
+            } catch (error) {
+                console.error('Error editing worker:', error);
+                alert('Errore durante la modifica del lavoratore');
+            }
+        }
+
+        async function deleteWorker() {
+            if (selectedWorkerIndex === -1) {
+                alert('Seleziona un lavoratore da cancellare!');
+                return;
+            }
+
+            if (confirm('Sei sicuro di voler cancellare questo lavoratore?')) {
+                try {
+                    await removeFromFirebase(`lavoratori/${selectedWorkerIndex}`);
+                    
+                    // Clear form and selection
+                    document.getElementById('nome').value = '';
+                    document.getElementById('cognome').value = '';
+                    document.getElementById('matricola').value = '';
+                    document.getElementById('reparto').value = '';
+                    document.getElementById('mansione').value = '';
+                    selectedWorkerIndex = -1;
+                    
+                    alert('Lavoratore cancellato con successo!');
+                } catch (error) {
+                    console.error('Error deleting worker:', error);
+                    alert('Errore durante la cancellazione del lavoratore');
+                }
+            }
+        }
+
+        async function removeWorker(workerId) {
+            if (confirm('Sei sicuro di voler cancellare questo lavoratore?')) {
+                try {
+                    await removeFromFirebase(`lavoratori/${workerId}`);
+                    alert('Lavoratore cancellato con successo!');
+                } catch (error) {
+                    console.error('Error removing worker:', error);
+                    alert('Errore durante la cancellazione del lavoratore');
+                }
+            }
+        }
+
+        // DPI management functions
+        async function addDPI() {
+            const nome = document.getElementById('nome-dpi').value.trim();
+            const sap = document.getElementById('codice-sap').value.trim();
+            const categoria = document.getElementById('categoria').value;
+            const scadenza = document.getElementById('scadenza').value;
+            const note = document.getElementById('note-dpi').value.trim();
+            
+            if (!nome || !sap || !categoria) {
+                alert('Nome, codice SAP e categoria sono obbligatori!');
+                return;
+            }
+            
+            try {
+                // Check if SAP code already exists
+                if (dpiData.some(d => d.sap === sap)) {
+                    alert('Codice SAP già esistente!');
+                    return;
+                }
+                
+                const newDPI = { nome, sap, categoria, scadenza: scadenza ? parseInt(scadenza) : null, note };
+                await pushToFirebase('dpi', newDPI);
+                
+                // Clear form
+                document.getElementById('nome-dpi').value = '';
+                document.getElementById('codice-sap').value = '';
+                document.getElementById('categoria').value = '';
+                document.getElementById('scadenza').value = '';
+                document.getElementById('note-dpi').value = '';
+                
+                alert('DPI aggiunto con successo!');
+            } catch (error) {
+                console.error('Error adding DPI:', error);
+                alert('Errore durante l\'aggiunta del DPI');
+            }
+        }
+
+        async function selectDPI(dpiId) {
+            const dpi = dpiData.find(d => d.id === dpiId);
+            if (dpi) {
+                document.getElementById('nome-dpi').value = dpi.nome;
+                document.getElementById('codice-sap').value = dpi.sap;
+                document.getElementById('categoria').value = dpi.categoria;
+                document.getElementById('scadenza').value = dpi.scadenza || '';
+                document.getElementById('note-dpi').value = dpi.note || '';
+                selectedDPIIndex = dpiId;
+            }
+        }
+
+        async function editDPI() {
+            if (selectedDPIIndex === -1) {
+                alert('Seleziona un DPI da modificare!');
+                return;
+            }
+
+            const nome = document.getElementById('nome-dpi').value.trim();
+            const sap = document.getElementById('codice-sap').value.trim();
+            const categoria = document.getElementById('categoria').value;
+            const scadenza = document.getElementById('scadenza').value;
+            const note = document.getElementById('note-dpi').value.trim();
+            
+            if (!nome || !sap || !categoria) {
+                alert('Nome, codice SAP e categoria sono obbligatori!');
+                return;
+            }
+
+            try {
+                const updatedDPI = { nome, sap, categoria, scadenza: scadenza ? parseInt(scadenza) : null, note };
+                await saveToFirebase(`dpi/${selectedDPIIndex}`, updatedDPI);
+                
+                // Clear form and selection
+                document.getElementById('nome-dpi').value = '';
+                document.getElementById('codice-sap').value = '';
+                document.getElementById('categoria').value = '';
+                document.getElementById('scadenza').value = '';
+                document.getElementById('note-dpi').value = '';
+                selectedDPIIndex = -1;
+                
+                alert('DPI modificato con successo!');
+            } catch (error) {
+                console.error('Error editing DPI:', error);
+                alert('Errore durante la modifica del DPI');
+            }
+        }
+
+        async function deleteDPI() {
+            if (selectedDPIIndex === -1) {
+                alert('Seleziona un DPI da cancellare!');
+                return;
+            }
+
+            if (confirm('Sei sicuro di voler cancellare questo DPI?')) {
+                try {
+                    await removeFromFirebase(`dpi/${selectedDPIIndex}`);
+                    
+                    // Clear form and selection
+                    document.getElementById('nome-dpi').value = '';
+                    document.getElementById('codice-sap').value = '';
+                    document.getElementById('categoria').value = '';
+                    document.getElementById('scadenza').value = '';
+                    document.getElementById('note-dpi').value = '';
+                    selectedDPIIndex = -1;
+                    
+                    alert('DPI cancellato con successo!');
+                } catch (error) {
+                    console.error('Error deleting DPI:', error);
+                    alert('Errore durante la cancellazione del DPI');
+                }
+            }
+        }
+
+        async function removeDPI(dpiId) {
+            if (confirm('Sei sicuro di voler cancellare questo DPI?')) {
+                try {
+                    await removeFromFirebase(`dpi/${dpiId}`);
+                    alert('DPI cancellato con successo!');
+                } catch (error) {
+                    console.error('Error removing DPI:', error);
+                    alert('Errore durante la cancellazione del DPI');
+                }
+            }
+        }
+
+        // Delivery management functions
+        async function saveDelivery() {
+            try {
+                if (currentDelivery.length === 0) {
+                    alert('Nessun item da salvare nella consegna!');
+                    return;
+                }
+
+                // Save each delivery item to Firebase
+                for (const item of currentDelivery) {
+                    await pushToFirebase('consegne', item);
+                }
+                
+                // Reset currentDelivery and update table
+                currentDelivery = [];
+                renderDeliveryTable(); 
+                
+                alert('Consegna salvata con successo!');
+                
+                // Update worker deliveries
+                loadWorkerDeliveries();
+
+            } catch (error) {
+                console.error('Error saving delivery:', error);
+                alert('Si è verificato un errore durante il salvataggio della consegna.');
+            }
+        }
+
+        async function loadWorkerDeliveries() {
+            const workerId = document.getElementById('select-lavoratore').value;
+            const existingDeliveriesDiv = document.getElementById('existing-deliveries');
+            const tableDiv = document.getElementById('worker-deliveries-table');
+            
+            if (!workerId) {
+                existingDeliveriesDiv.style.display = 'none';
+                return;
+            }
+            
+            try {
+                const workerDeliveries = deliveriesData.filter(d => d.lavoratore === workerId);
+                
+                if (workerDeliveries.length === 0) {
+                    existingDeliveriesDiv.style.display = 'none';
+                    return;
+                }
+                
+                let tableHtml = `
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>DPI</th>
+                                <th>Codice SAP</th>
+                                <th>Quantità</th>
+                                <th>Data</th>
+                                <th>Motivo</th>
+                                <th>Firma Preposto</th>
+                                <th>Firma Lavoratore</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+                
+                workerDeliveries.forEach(delivery => {
+                    const firmaPreposto = delivery.firmaPreposto ? `<img src="${delivery.firmaPreposto}" class="signature-preview" alt="Firma Preposto">` : '-';
+                    const firmaLavoratore = delivery.firmaLavoratore ? `<img src="${delivery.firmaLavoratore}" class="signature-preview" alt="Firma Lavoratore">` : '-';
+                    
+                    // Find SAP code
+                    const dpi = dpiData.find(d => d.nome === delivery.dpiText);
+                    const codiceSAP = dpi ? dpi.sap : 'N/A';
+                    
+                    tableHtml += `
+                        <tr>
+                            <td>${delivery.dpiText}</td>
+                            <td><strong>${codiceSAP}</strong></td>
+                            <td>${delivery.quantita}</td>
+                            <td>${delivery.data}</td>
+                            <td>${getReasonText(delivery.motivo)}</td>
+                            <td>${firmaPreposto}</td>
+                            <td>${firmaLavoratore}</td>
+                        </tr>
+                    `;
+                });
+                
+                tableHtml += '</tbody></table>';
+                tableDiv.innerHTML = tableHtml;
+                existingDeliveriesDiv.style.display = 'block';
+            } catch (error) {
+                console.error('Error loading worker deliveries:', error);
+            }
+        }
+
+        function getReasonText(reason) {
+            switch(reason) {
+                case 'primo': return 'Primo Prelievo';
+                case 'danneggiato': return 'Danneggiato';
+                case 'scaduto': return 'Scaduto';
+                default: return reason;
+            }
+        }
+
+        function addToDelivery() {
+            try {
+                // Validation
+                let isValid = true;
+                const errorMessages = {
+                    lavoratore: document.getElementById('error-lavoratore'),
+                    dpi: document.getElementById('error-dpi'),
+                    quantita: document.getElementById('error-quantita'),
+                    data: document.getElementById('error-data'),
+                    firmaPreposto: document.getElementById('error-firma-preposto'),
+                    firmaLavoratore: document.getElementById('error-firma-lavoratore')
+                };
+
+                // Clear previous errors
+                Object.values(errorMessages).forEach(el => el.textContent = '');
+
+                const lavoratore = document.getElementById('select-lavoratore').value;
+                const dpi = document.getElementById('select-dpi').value;
+                const quantita = parseInt(document.getElementById('quantita').value);
+                const data = document.getElementById('data-consegna').value;
+                const motivo = document.getElementById('motivo').value;
+
+                if (!lavoratore) {
+                    errorMessages.lavoratore.textContent = 'Seleziona un lavoratore';
+                    isValid = false;
+                }
+
+                if (!dpi) {
+                    errorMessages.dpi.textContent = 'Seleziona un DPI';
+                    isValid = false;
+                }
+
+                if (!quantita || quantita < 1) {
+                    errorMessages.quantita.textContent = 'Inserisci una quantità valida';
+                    isValid = false;
+                }
+
+                if (!data) {
+                    errorMessages.data.textContent = 'Seleziona una data';
+                    isValid = false;
+                }
+
+                // Check signatures
+                const canvasPreposto = document.getElementById('firma-preposto');
+                const canvasLavoratore = document.getElementById('firma-lavoratore');
+
+                if (!hasSignedPreposto || isCanvasEmpty(canvasPreposto)) {
+                    errorMessages.firmaPreposto.textContent = 'Firma del preposto richiesta';
+                    isValid = false;
+                }
+
+                if (!hasSignedLavoratore || isCanvasEmpty(canvasLavoratore)) {
+                    errorMessages.firmaLavoratore.textContent = 'Firma del lavoratore richiesta';
+                    isValid = false;
+                }
+
+                if (!isValid) {
+                    return;
+                }
+
+                // Get worker and DPI data for display
+                const worker = workersData.find(w => w.matricola === lavoratore);
+                const dpiItem = dpiData.find(d => d.sap === dpi);
+                
+                const lavoratoreText = worker ? `${worker.cognome} ${worker.nome}` : lavoratore;
+                const dpiText = dpiItem ? dpiItem.nome : dpi;
+                
+                // Complete worker data for printing
+                const workerData = worker ? {
+                    nome: worker.nome,
+                    cognome: worker.cognome,
+                    matricola: worker.matricola,
+                    reparto: worker.reparto || '',
+                    mansione: worker.mansione || ''
+                } : null;
+
+                // Convert signatures to base64
+                const firmaPreposto = canvasPreposto.toDataURL();
+                const firmaLavoratore = canvasLavoratore.toDataURL();
+
+                // Add to current delivery
+                const deliveryItem = {
+                    lavoratore,
+                    lavoratoreText,
+                    workerData,
+                    dpi,
+                    dpiText,
+                    quantita,
+                    data,
+                    motivo,
+                    firmaPreposto,
+                    firmaLavoratore
+                };
+
+                currentDelivery.push(deliveryItem);
+                renderDeliveryTable();
+
+                // Reset signatures
+                clearSignature('firma-preposto');
+                clearSignature('firma-lavoratore');
+
+                alert('Item aggiunto alla consegna!');
+
+            } catch (error) {
+                console.error('Error in addToDelivery:', error);
+                alert('Si è verificato un errore durante l\'aggiunta dell\'item alla consegna.');
+            }
+        }
+
+        function renderDeliveryTable() {
+            const tbody = document.getElementById('delivery-table-body');
+            tbody.innerHTML = '';
+
+            currentDelivery.forEach((item, index) => {
+                const row = tbody.insertRow();
+                // Show name and surname if available
+                const workerDisplay = item.workerData ? 
+                    `${item.workerData.cognome} ${item.workerData.nome} (${item.workerData.matricola})` : 
+                    item.lavoratoreText;
+                
+                row.innerHTML = `
+                    <td>${workerDisplay}</td>
+                    <td>${item.dpiText}</td>
+                    <td>${item.dpi}</td>
+                    <td>${item.quantita}</td>
+                    <td>${item.data}</td>
+                    <td>${getReasonText(item.motivo)}</td>
+                    <td><img src="${item.firmaPreposto}" class="signature-preview" alt="Firma Preposto"></td>
+                    <td><img src="${item.firmaLavoratore}" class="signature-preview" alt="Firma Lavoratore"></td>
+                    <td>
+                        <button class="btn danger" onclick="removeFromDelivery(${index})">🗑️</button>
+                    </td>
+                `;
+            });
+        }
+
+        function removeFromDelivery(index) {
+            if (confirm('Rimuovere questo item dalla consegna?')) {
+                currentDelivery.splice(index, 1);
+                renderDeliveryTable();
+            }
+        }
+
+        // Settings functions
+        async function saveSettings() {
+            try {
+                const companyName = document.getElementById('company-name').value.trim();
+                const useLogoOnPrint = document.getElementById('use-logo-print').checked;
+                
+                const settings = {
+                    companyName,
+                    useLogoOnPrint
+                };
+
+                // Handle logo upload if file is selected
+                const logoFile = document.getElementById('company-logo').files[0];
+                if (logoFile) {
+                    // Convert to base64 for storage
+                    const reader = new FileReader();
+                    reader.onload = async function(e) {
+                        settings.companyLogo = e.target.result;
+                        await saveToFirebase('appSettings', settings);
+                        alert('Impostazioni salvate con successo!');
+                    };
+                    reader.readAsDataURL(logoFile);
+                } else {
+                    // Keep existing logo if any
+                    if (settingsData.companyLogo) {
+                        settings.companyLogo = settingsData.companyLogo;
+                    }
+                    await saveToFirebase('appSettings', settings);
+                    alert('Impostazioni salvate con successo!');
+                }
+            } catch (error) {
+                console.error('Error saving settings:', error);
+                alert('Errore durante il salvataggio delle impostazioni');
+            }
+        }
+
+        // Search functions
+        function updateSearchFields() {
+            // Implementation for search fields update
+            const searchType = document.getElementById('search-type').value;
+            const searchTerm = document.getElementById('search-term');
+            
+            switch(searchType) {
+                case 'lavoratori':
+                    searchTerm.placeholder = 'Cerca per nome, cognome o matricola';
                     break;
-                case 'dpi-section':
-                    loadDPI();
+                case 'dpi':
+                    searchTerm.placeholder = 'Cerca per nome DPI o codice SAP';
                     break;
-                case 'consegna-section':
-                    loadWorkersForDelivery();
-                    loadDPIForDelivery();
-                    setTodayDate();
-                    // Inizializza i canvas delle firme con un piccolo ritardo
-                    setTimeout(() => {
-                        initSignatureCanvases();
-                    }, 100);
-                    break;
-                case 'stampa-section':
-                    loadWorkersForPrint();
-                    loadDepartments();
-                    break;
-                case 'cerca-section':
-                    updateSearchFields();
-                    break;
-                case 'impostazioni-section':
-                    loadSettings();
+                case 'consegne':
+                    searchTerm.placeholder = 'Cerca per lavoratore o DPI';
                     break;
             }
         }
 
-        // Funzioni per la gestione delle firme
+        async function performSearch() {
+            const searchType = document.getElementById('search-type').value;
+            const searchTerm = document.getElementById('search-term').value.trim().toLowerCase();
+            const resultsDiv = document.getElementById('search-results');
+            const contentDiv = document.getElementById('search-results-content');
+            
+            if (!searchTerm) {
+                alert('Inserisci un termine di ricerca');
+                return;
+            }
+
+            let results = [];
+            let tableHtml = '';
+
+            try {
+                switch(searchType) {
+                    case 'lavoratori':
+                        results = workersData.filter(worker => 
+                            worker.nome.toLowerCase().includes(searchTerm) ||
+                            worker.cognome.toLowerCase().includes(searchTerm) ||
+                            worker.matricola.toLowerCase().includes(searchTerm)
+                        );
+                        
+                        tableHtml = `
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Nome</th>
+                                        <th>Cognome</th>
+                                        <th>Matricola</th>
+                                        <th>Reparto</th>
+                                        <th>Mansione</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                        `;
+                        
+                        results.forEach(worker => {
+                            tableHtml += `
+                                <tr>
+                                    <td>${worker.nome}</td>
+                                    <td>${worker.cognome}</td>
+                                    <td>${worker.matricola}</td>
+                                    <td>${worker.reparto || '-'}</td>
+                                    <td>${worker.mansione || '-'}</td>
+                                </tr>
+                            `;
+                        });
+                        break;
+
+                    case 'dpi':
+                        results = dpiData.filter(dpi => 
+                            dpi.nome.toLowerCase().includes(searchTerm) ||
+                            dpi.sap.toLowerCase().includes(searchTerm)
+                        );
+                        
+                        tableHtml = `
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Nome</th>
+                                        <th>Codice SAP</th>
+                                        <th>Categoria</th>
+                                        <th>Scadenza (mesi)</th>
+                                        <th>Note</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                        `;
+                        
+                        results.forEach(dpi => {
+                            tableHtml += `
+                                <tr>
+                                    <td>${dpi.nome}</td>
+                                    <td>${dpi.sap}</td>
+                                    <td>${dpi.categoria}</td>
+                                    <td>${dpi.scadenza || '-'}</td>
+                                    <td>${dpi.note || '-'}</td>
+                                </tr>
+                            `;
+                        });
+                        break;
+
+                    case 'consegne':
+                        results = deliveriesData.filter(delivery => 
+                            (delivery.lavoratoreText && delivery.lavoratoreText.toLowerCase().includes(searchTerm)) ||
+                            (delivery.dpiText && delivery.dpiText.toLowerCase().includes(searchTerm)) ||
+                            (delivery.lavoratore && delivery.lavoratore.toLowerCase().includes(searchTerm))
+                        );
+                        
+                        tableHtml = `
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Lavoratore</th>
+                                        <th>DPI</th>
+                                        <th>Codice SAP</th>
+                                        <th>Quantità</th>
+                                        <th>Data</th>
+                                        <th>Motivo</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                        `;
+                        
+                        results.forEach(delivery => {
+                            const dpi = dpiData.find(d => d.nome === delivery.dpiText);
+                            const codiceSAP = dpi ? dpi.sap : 'N/A';
+                            
+                            tableHtml += `
+                                <tr>
+                                    <td>${delivery.lavoratoreText || delivery.lavoratore}</td>
+                                    <td>${delivery.dpiText || delivery.dpi}</td>
+                                    <td><strong>${codiceSAP}</strong></td>
+                                    <td>${delivery.quantita}</td>
+                                    <td>${delivery.data}</td>
+                                    <td>${getReasonText(delivery.motivo)}</td>
+                                </tr>
+                            `;
+                        });
+                        break;
+                }
+
+                tableHtml += '</tbody></table>';
+                
+                if (results.length === 0) {
+                    contentDiv.innerHTML = '<p>Nessun risultato trovato.</p>';
+                } else {
+                    contentDiv.innerHTML = tableHtml;
+                }
+                
+                resultsDiv.style.display = 'block';
+
+            } catch (error) {
+                console.error('Error performing search:', error);
+                alert('Errore durante la ricerca');
+            }
+        }
+
+        function showAllDeliveriesInSearch() {
+            const resultsDiv = document.getElementById('search-results');
+            const contentDiv = document.getElementById('search-results-content');
+            
+            if (deliveriesData.length === 0) {
+                contentDiv.innerHTML = '<p>Nessuna consegna trovata.</p>';
+                resultsDiv.style.display = 'block';
+                return;
+            }
+
+            let tableHtml = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Lavoratore</th>
+                            <th>DPI</th>
+                            <th>Codice SAP</th>
+                            <th>Quantità</th>
+                            <th>Data</th>
+                            <th>Motivo</th>
+                            <th>Firma Preposto</th>
+                            <th>Firma Lavoratore</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+            
+            deliveriesData.forEach(delivery => {
+                const firmaPreposto = delivery.firmaPreposto ? `<img src="${delivery.firmaPreposto}" class="signature-preview" alt="Firma Preposto">` : '-';
+                const firmaLavoratore = delivery.firmaLavoratore ? `<img src="${delivery.firmaLavoratore}" class="signature-preview" alt="Firma Lavoratore">` : '-';
+                
+                const dpi = dpiData.find(d => d.nome === delivery.dpiText);
+                const codiceSAP = dpi ? dpi.sap : 'N/A';
+                
+                tableHtml += `
+                    <tr>
+                        <td>${delivery.lavoratoreText || delivery.lavoratore}</td>
+                        <td>${delivery.dpiText || delivery.dpi}</td>
+                        <td><strong>${codiceSAP}</strong></td>
+                        <td>${delivery.quantita}</td>
+                        <td>${delivery.data}</td>
+                        <td>${getReasonText(delivery.motivo)}</td>
+                        <td>${firmaPreposto}</td>
+                        <td>${firmaLavoratore}</td>
+                    </tr>
+                `;
+            });
+            
+            tableHtml += '</tbody></table>';
+            contentDiv.innerHTML = tableHtml;
+            resultsDiv.style.display = 'block';
+        }
+
+        function clearSearch() {
+            document.getElementById('search-term').value = '';
+            document.getElementById('search-results').style.display = 'none';
+        }
+
+        // Print functions
+        async function showAllDeliveries() {
+            const previewContent = document.getElementById('delivery-preview-content');
+            if (!previewContent) return;
+            
+            if (deliveriesData.length === 0) {
+                previewContent.innerHTML = '<tr><td colspan="9">Nessuna consegna trovata.</td></tr>';
+                return;
+            }
+            
+            let html = '';
+            
+            deliveriesData.forEach((delivery, index) => {
+                const firmaPreposto = delivery.firmaPreposto ? `<img src="${delivery.firmaPreposto}" class="signature-preview" alt="Firma Preposto">` : '-';
+                const firmaLavoratore = delivery.firmaLavoratore ? `<img src="${delivery.firmaLavoratore}" class="signature-preview" alt="Firma Lavoratore">` : '-';
+                
+                // Find SAP code
+                const dpi = dpiData.find(d => d.nome === (delivery.dpiText || delivery.dpi));
+                const codiceSAP = dpi ? dpi.sap : 'N/A';
+                
+                // Find worker data
+                let lavoratoreDisplay = delivery.lavoratoreText || delivery.lavoratore;
+                if (delivery.workerData) {
+                    lavoratoreDisplay = `${delivery.workerData.cognome} ${delivery.workerData.nome} (${delivery.workerData.matricola})`;
+                } else {
+                    const worker = workersData.find(w => w.matricola === delivery.lavoratore);
+                    if (worker) {
+                        lavoratoreDisplay = `${worker.cognome} ${worker.nome} (${worker.matricola})`;
+                    }
+                }
+                
+                html += `
+                    <tr>
+                        <td><input type="checkbox" class="delivery-checkbox" data-index="${index}"></td>
+                        <td>${lavoratoreDisplay}</td>
+                        <td>${delivery.dpiText || delivery.dpi}</td>
+                        <td><strong>${codiceSAP}</strong></td>
+                        <td>${delivery.quantita}</td>
+                        <td>${delivery.data}</td>
+                        <td>${getReasonText(delivery.motivo)}</td>
+                        <td>${firmaPreposto}</td>
+                        <td>${firmaLavoratore}</td>
+                    </tr>
+                `;
+            });
+            
+            previewContent.innerHTML = html;
+        }
+
+        function updateDeliveryPreview() {
+            // Implementation for updating delivery preview based on filters
+            showAllDeliveries();
+        }
+
+        function clearDeliveryPreview() {
+            const previewContent = document.getElementById('delivery-preview-content');
+            if (previewContent) {
+                previewContent.innerHTML = '<tr><td colspan="9">Seleziona un lavoratore o clicca "Mostra tutte le consegne" per visualizzare le consegne.</td></tr>';
+            }
+        }
+
+        function toggleSelectAll() {
+            const selectAll = document.getElementById('select-all');
+            const checkboxes = document.querySelectorAll('.delivery-checkbox');
+            
+            checkboxes.forEach(checkbox => {
+                checkbox.checked = selectAll.checked;
+            });
+        }
+
+        // PDF Generation Functions
+        async function anteprimaPDF(type) {
+            const loading = document.getElementById('loading');
+            const statusMessage = document.getElementById('statusMessage');
+            
+            try {
+                loading.style.display = 'block';
+                statusMessage.style.display = 'none';
+                
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF();
+                
+                // Company info
+                const companyName = settingsData.companyName || 'Azienda';
+                const currentDate = new Date().toLocaleDateString('it-IT');
+                
+                // Header
+                doc.setFontSize(20);
+                doc.text(companyName, 20, 20);
+                doc.setFontSize(12);
+                doc.text(`Data: ${currentDate}`, 20, 30);
+                
+                let yPosition = 50;
+                
+                switch(type) {
+                    case 'consegne':
+                        const result = await generateDeliveriesPDF(doc, yPosition);
+                        if (result && result.selectedWorker) {
+                            currentPdfName = `Consegne_DPI_${result.selectedWorker.cognome}_${currentDate.replace(/\//g, '-')}.pdf`;
+                        } else {
+                            currentPdfName = `Consegne_DPI_${currentDate.replace(/\//g, '-')}.pdf`;
+                        }
+                        break;
+                        
+                    case 'lavoratori':
+                        generateWorkersPDF(doc, yPosition);
+                        currentPdfName = `Elenco_Lavoratori_${currentDate.replace(/\//g, '-')}.pdf`;
+                        break;
+                        
+                    case 'dpi':
+                        generateDPIPDF(doc, yPosition);
+                        currentPdfName = `Elenco_DPI_${currentDate.replace(/\//g, '-')}.pdf`;
+                        break;
+                }
+                
+                // Create blob and show preview
+                const pdfBlob = doc.output('blob');
+                const pdfUrl = URL.createObjectURL(pdfBlob);
+                
+                currentPdfDoc = doc;
+                
+                // Show modal with preview
+                const modal = document.getElementById('pdf-preview-modal');
+                const iframe = document.getElementById('pdf-preview-iframe');
+                iframe.src = pdfUrl;
+                modal.style.display = 'block';
+                
+                loading.style.display = 'none';
+                
+            } catch (error) {
+                console.error('Error generating PDF:', error);
+                loading.style.display = 'none';
+                statusMessage.textContent = 'Errore durante la generazione del PDF';
+                statusMessage.className = 'status-message error';
+                statusMessage.style.display = 'block';
+            }
+        }
+
+        async function generateDeliveriesPDF(doc, startY) {
+            // Get selected worker from the print section
+            const selectedWorkerMatricola = document.getElementById('select-lavoratore-stampa').value;
+            let selectedWorker = null;
+            let workerTitle = 'Registro Consegne DPI';
+            
+            if (selectedWorkerMatricola) {
+                selectedWorker = workersData.find(w => w.matricola === selectedWorkerMatricola);
+                if (selectedWorker) {
+                    workerTitle = `${selectedWorker.cognome} ${selectedWorker.nome}`;
+                    // Add worker details
+                    doc.setFontSize(16);
+                    doc.text(workerTitle, 20, startY);
+                    doc.setFontSize(12);
+                    doc.text(`Matricola: ${selectedWorker.matricola}`, 20, startY + 15);
+                    if (selectedWorker.reparto) {
+                        doc.text(`Reparto: ${selectedWorker.reparto}`, 20, startY + 25);
+                    }
+                    if (selectedWorker.mansione) {
+                        doc.text(`Mansione: ${selectedWorker.mansione}`, 20, startY + 35);
+                    }
+                    startY += 45;
+                } else {
+                    doc.setFontSize(16);
+                    doc.text(workerTitle, 20, startY);
+                }
+            } else {
+                doc.setFontSize(16);
+                doc.text(workerTitle, 20, startY);
+            }
+            
+            let yPos = startY + 20;
+            
+            // Get selected deliveries or all deliveries
+            const selectedCheckboxes = document.querySelectorAll('.delivery-checkbox:checked');
+            let deliveriesToPrint = [];
+            
+            if (selectedCheckboxes.length > 0) {
+                selectedCheckboxes.forEach(checkbox => {
+                    const index = parseInt(checkbox.dataset.index);
+                    deliveriesToPrint.push(deliveriesData[index]);
+                });
+            } else {
+                // If a specific worker is selected, filter deliveries for that worker
+                if (selectedWorkerMatricola) {
+                    deliveriesToPrint = deliveriesData.filter(d => d.lavoratore === selectedWorkerMatricola);
+                } else {
+                    deliveriesToPrint = deliveriesData;
+                }
+            }
+            
+            if (deliveriesToPrint.length === 0) {
+                doc.setFontSize(12);
+                doc.text('Nessuna consegna da stampare', 20, yPos);
+                return { selectedWorker };
+            }
+            
+            // Table headers
+            doc.setFontSize(10);
+            doc.text('Lavoratore', 20, yPos);
+            doc.text('DPI', 70, yPos);
+            doc.text('SAP', 120, yPos);
+            doc.text('Qty', 140, yPos);
+            doc.text('Data', 160, yPos);
+            
+            yPos += 10;
+            doc.line(20, yPos, 190, yPos); // Header line
+            yPos += 5;
+            
+            // Table content
+            for (const delivery of deliveriesToPrint) {
+                if (yPos > 270) { // New page if needed
+                    doc.addPage();
+                    yPos = 20;
+                }
+                
+                const worker = workersData.find(w => w.matricola === delivery.lavoratore);
+                const workerName = worker ? `${worker.cognome} ${worker.nome}` : delivery.lavoratore;
+                const dpi = dpiData.find(d => d.nome === delivery.dpiText);
+                const sapCode = dpi ? dpi.sap : 'N/A';
+                
+                doc.text(workerName.substring(0, 20), 20, yPos);
+                doc.text((delivery.dpiText || '').substring(0, 20), 70, yPos);
+                doc.text(sapCode, 120, yPos);
+                doc.text(delivery.quantita.toString(), 140, yPos);
+                doc.text(delivery.data, 160, yPos);
+                
+                yPos += 8;
+            }
+            
+            return { selectedWorker };
+        }
+
+        function generateWorkersPDF(doc, startY) {
+            doc.setFontSize(16);
+            doc.text('Elenco Lavoratori', 20, startY);
+            
+            let yPos = startY + 20;
+            
+            if (workersData.length === 0) {
+                doc.setFontSize(12);
+                doc.text('Nessun lavoratore registrato', 20, yPos);
+                return;
+            }
+            
+            // Table headers
+            doc.setFontSize(10);
+            doc.text('Nome', 20, yPos);
+            doc.text('Cognome', 60, yPos);
+            doc.text('Matricola', 100, yPos);
+            doc.text('Reparto', 130, yPos);
+            doc.text('Mansione', 160, yPos);
+            
+            yPos += 10;
+            doc.line(20, yPos, 190, yPos); // Header line
+            yPos += 5;
+            
+            // Table content
+            workersData.forEach(worker => {
+                if (yPos > 270) { // New page if needed
+                    doc.addPage();
+                    yPos = 20;
+                }
+                
+                doc.text(worker.nome.substring(0, 15), 20, yPos);
+                doc.text(worker.cognome.substring(0, 15), 60, yPos);
+                doc.text(worker.matricola, 100, yPos);
+                doc.text((worker.reparto || '-').substring(0, 12), 130, yPos);
+                doc.text((worker.mansione || '-').substring(0, 12), 160, yPos);
+                
+                yPos += 8;
+            });
+        }
+
+        function generateDPIPDF(doc, startY) {
+            doc.setFontSize(16);
+            doc.text('Elenco DPI', 20, startY);
+            
+            let yPos = startY + 20;
+            
+            if (dpiData.length === 0) {
+                doc.setFontSize(12);
+                doc.text('Nessun DPI registrato', 20, yPos);
+                return;
+            }
+            
+            // Table headers
+            doc.setFontSize(10);
+            doc.text('Nome DPI', 20, yPos);
+            doc.text('Codice SAP', 80, yPos);
+            doc.text('Categoria', 120, yPos);
+            doc.text('Scadenza', 160, yPos);
+            
+            yPos += 10;
+            doc.line(20, yPos, 190, yPos); // Header line
+            yPos += 5;
+            
+            // Table content
+            dpiData.forEach(dpi => {
+                if (yPos > 270) { // New page if needed
+                    doc.addPage();
+                    yPos = 20;
+                }
+                
+                doc.text(dpi.nome.substring(0, 25), 20, yPos);
+                doc.text(dpi.sap, 80, yPos);
+                doc.text(dpi.categoria.substring(0, 15), 120, yPos);
+                doc.text((dpi.scadenza ? `${dpi.scadenza} mesi` : '-'), 160, yPos);
+                
+                yPos += 8;
+            });
+        }
+
+        function closePdfPreview() {
+            const modal = document.getElementById('pdf-preview-modal');
+            const iframe = document.getElementById('pdf-preview-iframe');
+            modal.style.display = 'none';
+            iframe.src = '';
+            
+            // Clean up blob URL
+            if (iframe.src) {
+                URL.revokeObjectURL(iframe.src);
+            }
+        }
+
+        function confermaStampa() {
+            if (currentPdfDoc && currentPdfName) {
+                currentPdfDoc.save(currentPdfName);
+                closePdfPreview();
+                
+                const statusMessage = document.getElementById('statusMessage');
+                statusMessage.textContent = 'PDF salvato con successo!';
+                statusMessage.className = 'status-message success';
+                statusMessage.style.display = 'block';
+                
+                setTimeout(() => {
+                    statusMessage.style.display = 'none';
+                }, 3000);
+            }
+        }
+
+        // Worker filtering functions
+        function filterWorkers(searchInputId, selectId) {
+            const searchInput = document.getElementById(searchInputId);
+            const searchTerm = searchInput.value.toLowerCase();
+            
+            // Get the corresponding dropdown
+            let dropdownId = 'worker-dropdown';
+            if (searchInputId.includes('stampa')) {
+                dropdownId = 'worker-dropdown-stampa';
+            }
+            
+            const dropdown = document.getElementById(dropdownId);
+            
+            if (searchTerm.length < 2) {
+                dropdown.style.display = 'none';
+                return;
+            }
+            
+            const filteredWorkers = workersData.filter(worker => 
+                worker.nome.toLowerCase().includes(searchTerm) ||
+                worker.cognome.toLowerCase().includes(searchTerm) ||
+                worker.matricola.toLowerCase().includes(searchTerm)
+            );
+            
+            if (filteredWorkers.length === 0) {
+                dropdown.style.display = 'none';
+                return;
+            }
+            
+            let html = '';
+            filteredWorkers.forEach(worker => {
+                html += `
+                    <div class="worker-dropdown-item" onclick="selectWorkerFromSearch('${worker.matricola}', '${searchInputId}', '${dropdownId}')">
+                        ${worker.cognome} ${worker.nome} (${worker.matricola})
+                    </div>
+                `;
+            });
+            
+            dropdown.innerHTML = html;
+            dropdown.style.display = 'block';
+        }
+
+        function selectWorkerFromSearch(matricola, searchInputId, dropdownId) {
+            const worker = workersData.find(w => w.matricola === matricola);
+            if (worker) {
+                const searchInput = document.getElementById(searchInputId);
+                searchInput.value = `${worker.cognome} ${worker.nome} (${worker.matricola})`;
+                
+                // Update the corresponding select
+                const selectId = searchInputId.replace('search-', 'select-');
+                const select = document.getElementById(selectId);
+                if (select) {
+                    select.value = matricola;
+                }
+                
+                // Hide dropdown
+                document.getElementById(dropdownId).style.display = 'none';
+                
+                // Load worker deliveries if in delivery section
+                if (searchInputId === 'search-lavoratore') {
+                    loadWorkerDeliveries();
+                }
+            }
+        }
+
+        function selectWorkerFromDropdown(searchInputId, selectId) {
+            const select = document.getElementById(selectId);
+            const searchInput = document.getElementById(searchInputId);
+            
+            if (select.value) {
+                const worker = workersData.find(w => w.matricola === select.value);
+                if (worker) {
+                    searchInput.value = `${worker.cognome} ${worker.nome} (${worker.matricola})`;
+                    
+                    // Load worker deliveries if in delivery section
+                    if (searchInputId === 'search-lavoratore') {
+                        loadWorkerDeliveries();
+                    }
+                }
+            } else {
+                searchInput.value = '';
+            }
+        }
+
+        // Signature functions
         function initSignatureCanvases() {
             try {
-                console.log('Inizializzando canvas delle firme...');
+                console.log('Initializing signature canvases...');
                 const canvasPreposto = document.getElementById('firma-preposto');
                 const canvasLavoratore = document.getElementById('firma-lavoratore');
                 
                 if (!canvasPreposto || !canvasLavoratore) {
-                    console.error('Canvas delle firme non trovati');
+                    console.error('Signature canvases not found');
                     return;
                 }
                 
-                console.log('Canvas trovati, configurando...');
+                console.log('Canvases found, setting up...');
                 setupSignature(canvasPreposto, 'Preposto');
                 setupSignature(canvasLavoratore, 'Lavoratore');
                 
-                console.log('Canvas delle firme inizializzati correttamente');
+                console.log('Signature canvases initialized correctly');
             } catch (error) {
-                console.error('Errore inizializzazione firme:', error);
+                console.error('Error initializing signatures:', error);
             }
         }
 
         function setupSignature(canvas, type) {
             if (!canvas) {
-                console.error('Canvas non valido per', type);
+                console.error('Invalid canvas for', type);
                 return;
             }
             
             const ctx = canvas.getContext('2d');
             if (!ctx) {
-                console.error('Impossibile ottenere il contesto 2D per', type);
+                console.error('Cannot get 2D context for', type);
                 return;
             }
             
-            // Pulisci il canvas
+            // Clear canvas
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             
-            // Imposta lo stile del disegno
+            // Set drawing style
             ctx.strokeStyle = '#000';
             ctx.lineWidth = 2;
             ctx.lineCap = 'round';
@@ -1054,7 +2492,7 @@
             let lastX = 0;
             let lastY = 0;
             
-            // Funzione per ottenere le coordinate corrette
+            // Function to get correct coordinates
             function getEventPos(e) {
                 const rect = canvas.getBoundingClientRect();
                 const scaleX = canvas.width / rect.width;
@@ -1073,7 +2511,7 @@
                 }
             }
             
-            // Event listeners per mouse
+            // Mouse event listeners
             canvas.addEventListener('mousedown', (e) => {
                 isDrawing = true;
                 const pos = getEventPos(e);
@@ -1108,7 +2546,7 @@
                 isDrawing = false;
             });
             
-            // Event listeners per touch
+            // Touch event listeners
             canvas.addEventListener('touchstart', (e) => {
                 e.preventDefault();
                 isDrawing = true;
@@ -1169,1764 +2607,139 @@
             return true;
         }
 
-        // Funzioni per la gestione dei lavoratori
-        function loadWorkers() {
-            const workers = JSON.parse(localStorage.getItem('lavoratori')) || [];
-            const tbody = document.getElementById('workers-table-body');
-            tbody.innerHTML = '';
-            
-            workers.forEach((worker, index) => {
-                const row = tbody.insertRow();
-                row.innerHTML = `
-                    <td>${worker.nome}</td>
-                    <td>${worker.cognome}</td>
-                    <td>${worker.matricola}</td>
-                    <td>${worker.reparto || '-'}</td>
-                    <td>${worker.mansione || '-'}</td>
-                    <td>
-                        <button class="btn warning" onclick="selectWorker(${index})">✏️</button>
-                        <button class="btn danger" onclick="removeWorker(${index})">🗑️</button>
-                    </td>
-                `;
-            });
-        }
-
-        function addWorker() {
-            const nome = document.getElementById('nome').value.trim();
-            const cognome = document.getElementById('cognome').value.trim();
-            const matricola = document.getElementById('matricola').value.trim();
-            const reparto = document.getElementById('reparto').value.trim();
-            const mansione = document.getElementById('mansione').value.trim();
-            
-            if (!nome || !cognome || !matricola) {
-                alert('Nome, cognome e matricola sono obbligatori!');
-                return;
-            }
-            
-            const workers = JSON.parse(localStorage.getItem('lavoratori')) || [];
-            
-            // Controlla se la matricola esiste già
-            if (workers.some(w => w.matricola === matricola)) {
-                alert('Matricola già esistente!');
-                return;
-            }
-            
-            const newWorker = { nome, cognome, matricola, reparto, mansione };
-            workers.push(newWorker);
-            localStorage.setItem('lavoratori', JSON.stringify(workers));
-            
-            // Pulisci i campi
-            document.getElementById('nome').value = '';
-            document.getElementById('cognome').value = '';
-            document.getElementById('matricola').value = '';
-            document.getElementById('reparto').value = '';
-            document.getElementById('mansione').value = '';
-            
-            loadWorkers();
-            alert('Lavoratore aggiunto con successo!');
-        }
-
-        function selectWorker(index) {
-            const workers = JSON.parse(localStorage.getItem('lavoratori')) || [];
-            const worker = workers[index];
-            
-            document.getElementById('nome').value = worker.nome;
-            document.getElementById('cognome').value = worker.cognome;
-            document.getElementById('matricola').value = worker.matricola;
-            document.getElementById('reparto').value = worker.reparto || '';
-            document.getElementById('mansione').value = worker.mansione || '';
-            
-            selectedWorkerIndex = index;
-        }
-
-        function editWorker() {
-            if (selectedWorkerIndex === -1) {
-                alert('Seleziona un lavoratore da modificare!');
-                return;
-            }
-            
-            const nome = document.getElementById('nome').value.trim();
-            const cognome = document.getElementById('cognome').value.trim();
-            const matricola = document.getElementById('matricola').value.trim();
-            const reparto = document.getElementById('reparto').value.trim();
-            const mansione = document.getElementById('mansione').value.trim();
-            
-            if (!nome || !cognome || !matricola) {
-                alert('Nome, cognome e matricola sono obbligatori!');
-                return;
-            }
-            
-            const workers = JSON.parse(localStorage.getItem('lavoratori')) || [];
-            
-            // Controlla se la matricola esiste già (escludendo il lavoratore corrente)
-            if (workers.some((w, i) => w.matricola === matricola && i !== selectedWorkerIndex)) {
-                alert('Matricola già esistente!');
-                return;
-            }
-            
-            workers[selectedWorkerIndex] = { nome, cognome, matricola, reparto, mansione };
-            localStorage.setItem('lavoratori', JSON.stringify(workers));
-            
-            // Pulisci i campi
-            document.getElementById('nome').value = '';
-            document.getElementById('cognome').value = '';
-            document.getElementById('matricola').value = '';
-            document.getElementById('reparto').value = '';
-            document.getElementById('mansione').value = '';
-            
-            selectedWorkerIndex = -1;
-            loadWorkers();
-            alert('Lavoratore modificato con successo!');
-        }
-
-        function deleteWorker() {
-            if (selectedWorkerIndex === -1) {
-                alert('Seleziona un lavoratore da cancellare!');
-                return;
-            }
-            
-            if (confirm('Sei sicuro di voler cancellare questo lavoratore?')) {
-                const workers = JSON.parse(localStorage.getItem('lavoratori')) || [];
-                workers.splice(selectedWorkerIndex, 1);
-                localStorage.setItem('lavoratori', JSON.stringify(workers));
-                
-                // Pulisci i campi
-                document.getElementById('nome').value = '';
-                document.getElementById('cognome').value = '';
-                document.getElementById('matricola').value = '';
-                document.getElementById('reparto').value = '';
-                document.getElementById('mansione').value = '';
-                
-                selectedWorkerIndex = -1;
-                loadWorkers();
-                alert('Lavoratore cancellato con successo!');
-            }
-        }
-
-        function removeWorker(index) {
-            if (confirm('Sei sicuro di voler cancellare questo lavoratore?')) {
-                const workers = JSON.parse(localStorage.getItem('lavoratori')) || [];
-                workers.splice(index, 1);
-                localStorage.setItem('lavoratori', JSON.stringify(workers));
-                loadWorkers();
-                alert('Lavoratore cancellato con successo!');
-            }
-        }
-
-        // Funzioni per l'importazione CSV
-        function importWorkersCSV() {
-            const fileInput = document.getElementById('csv-workers');
-            const file = fileInput.files[0];
-            const statusDiv = document.getElementById('csv-import-status');
-            
-            if (!file) {
-                alert('Seleziona un file CSV!');
-                return;
-            }
-            
-            statusDiv.innerHTML = '<div style="color: #3498db;">📥 Importazione in corso...</div>';
-            
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                try {
-                    const csv = e.target.result;
-                    const lines = csv.split('\n').filter(line => line.trim() !== '');
-                    const workers = JSON.parse(localStorage.getItem('lavoratori')) || [];
-                    let imported = 0;
-                    let skipped = 0;
-                    let errors = [];
-                    
-                    for (let i = 0; i < lines.length; i++) {
-                        const line = lines[i].trim();
-                        if (!line) continue;
-                        
-                        const parts = line.split(/[,;]/).map(s => s.trim().replace(/^[\"']|[\"']$/g, ''));
-                        
-                        if (parts.length < 3) {
-                            errors.push(`Riga ${i + 1}: non abbastanza campi`);
-                            skipped++;
-                            continue;
-                        }
-                        
-                        const [nome, cognome, matricola, reparto = '', mansione = ''] = parts;
-                        
-                        if (!nome || !cognome || !matricola) {
-                            errors.push(`Riga ${i + 1}: campi obbligatori mancanti`);
-                            skipped++;
-                            continue;
-                        }
-                        
-                        if (workers.some(w => w.matricola === matricola)) {
-                            errors.push(`Riga ${i + 1}: matricola ${matricola} già esistente`);
-                            skipped++;
-                            continue;
-                        }
-                        
-                        workers.push({ nome, cognome, matricola, reparto, mansione });
-                        imported++;
-                    }
-                    
-                    localStorage.setItem('lavoratori', JSON.stringify(workers));
-                    loadWorkers();
-                    
-                    let resultMessage = `✅ Importazione completata!\n📥 Importati: ${imported}\n⚠️ Saltati: ${skipped}`;
-                    
-                    if (errors.length > 0 && errors.length <= 5) {
-                        resultMessage += '\n\nErrori:\n' + errors.join('\n');
-                    } else if (errors.length > 5) {
-                        resultMessage += '\n\nPrimi 5 errori:\n' + errors.slice(0, 5).join('\n') + `\n... e altri ${errors.length - 5} errori`;
-                    }
-                    
-                    alert(resultMessage);
-                    statusDiv.innerHTML = `<div style="color: #27ae60;">✅ Importazione completata: ${imported} importati, ${skipped} saltati</div>`;
-                    fileInput.value = '';
-                    
-                } catch (error) {
-                    console.error('Errore durante l\'importazione del CSV:', error);
-                    const errorMessage = 'Errore durante l\'importazione del CSV: ' + error.message;
-                    alert(errorMessage);
-                    statusDiv.innerHTML = `<div style="color: #e74c3c;">❌ ${errorMessage}</div>`;
-                }
-            };
-            
-            reader.onerror = function() {
-                const errorMessage = 'Errore nella lettura del file';
-                alert(errorMessage);
-                statusDiv.innerHTML = `<div style="color: #e74c3c;">❌ ${errorMessage}</div>`;
-            };
-            
-            reader.readAsText(file, 'UTF-8');
-        }
-
-        function importDPICSV() {
-            const fileInput = document.getElementById('csv-dpi');
-            const file = fileInput.files[0];
-            const statusDiv = document.getElementById('csv-dpi-import-status');
-            
-            if (!file) {
-                alert('Seleziona un file CSV!');
-                return;
-            }
-            
-            statusDiv.innerHTML = '<div style="color: #3498db;">📥 Importazione in corso...</div>';
-            
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                try {
-                    const csv = e.target.result;
-                    const lines = csv.split('\n').filter(line => line.trim() !== '');
-                    const dpiList = JSON.parse(localStorage.getItem('dpi')) || [];
-                    let imported = 0;
-                    let skipped = 0;
-                    let errors = [];
-                    
-                    for (let i = 0; i < lines.length; i++) {
-                        const line = lines[i].trim();
-                        if (!line) continue;
-                        
-                        const parts = line.split(/[,;]/).map(s => s.trim().replace(/^[\"']|[\"']$/g, ''));
-                        
-                        if (parts.length < 3) {
-                            errors.push(`Riga ${i + 1}: non abbastanza campi`);
-                            skipped++;
-                            continue;
-                        }
-                        
-                        const [nome, sap, categoria, scadenza = '', note = ''] = parts;
-                        
-                        if (!nome || !sap || !categoria) {
-                            errors.push(`Riga ${i + 1}: campi obbligatori mancanti`);
-                            skipped++;
-                            continue;
-                        }
-                        
-                        if (dpiList.some(d => d.sap === sap)) {
-                            errors.push(`Riga ${i + 1}: codice SAP ${sap} già esistente`);
-                            skipped++;
-                            continue;
-                        }
-                        
-                        dpiList.push({
-                            nome: nome,
-                            sap: sap,
-                            categoria: categoria,
-                            scadenza: scadenza ? parseInt(scadenza) : null,
-                            note: note
-                        });
-                        imported++;
-                    }
-                    
-                    localStorage.setItem('dpi', JSON.stringify(dpiList));
-                    loadDPI();
-                    
-                    let resultMessage = `✅ Importazione completata!\n📥 Importati: ${imported}\n⚠️ Saltati: ${skipped}`;
-                    
-                    if (errors.length > 0 && errors.length <= 5) {
-                        resultMessage += '\n\nErrori:\n' + errors.join('\n');
-                    } else if (errors.length > 5) {
-                        resultMessage += '\n\nPrimi 5 errori:\n' + errors.slice(0, 5).join('\n') + `\n... e altri ${errors.length - 5} errori`;
-                    }
-                    
-                    alert(resultMessage);
-                    statusDiv.innerHTML = `<div style="color: #27ae60;">✅ Importazione completata: ${imported} importati, ${skipped} saltati</div>`;
-                    fileInput.value = '';
-                    
-                } catch (error) {
-                    console.error('Errore durante l\'importazione del CSV DPI:', error);
-                    const errorMessage = 'Errore durante l\'importazione del CSV DPI: ' + error.message;
-                    alert(errorMessage);
-                    statusDiv.innerHTML = `<div style="color: #e74c3c;">❌ ${errorMessage}</div>`;
-                }
-            };
-            
-            reader.onerror = function() {
-                const errorMessage = 'Errore nella lettura del file';
-                alert(errorMessage);
-                statusDiv.innerHTML = `<div style="color: #e74c3c;">❌ ${errorMessage}</div>`;
-            };
-            
-            reader.readAsText(file, 'UTF-8');
-        }
-
-        // Funzioni per la gestione dei DPI
-        function loadDPI() {
-            const dpiList = JSON.parse(localStorage.getItem('dpi')) || [];
-            const tbody = document.getElementById('dpi-table-body');
-            tbody.innerHTML = '';
-            
-            dpiList.forEach((dpi, index) => {
-                const row = tbody.insertRow();
-                row.innerHTML = `
-                    <td>${dpi.nome}</td>
-                    <td>${dpi.sap}</td>
-                    <td>${dpi.categoria}</td>
-                    <td>${dpi.scadenza || '-'}</td>
-                    <td>${dpi.note || '-'}</td>
-                    <td>
-                        <button class="btn warning" onclick="selectDPI(${index})">✏️</button>
-                        <button class="btn danger" onclick="removeDPI(${index})">🗑️</button>
-                    </td>
-                `;
-            });
-        }
-
-        function addDPI() {
-            const nome = document.getElementById('nome-dpi').value.trim();
-            const sap = document.getElementById('codice-sap').value.trim();
-            const categoria = document.getElementById('categoria').value;
-            const scadenza = document.getElementById('scadenza').value;
-            const note = document.getElementById('note-dpi').value.trim();
-            
-            if (!nome || !sap || !categoria) {
-                alert('Nome, codice SAP e categoria sono obbligatori!');
-                return;
-            }
-            
-            const dpiList = JSON.parse(localStorage.getItem('dpi')) || [];
-            
-            // Controlla se il codice SAP esiste già
-            if (dpiList.some(d => d.sap === sap)) {
-                alert('Codice SAP già esistente!');
-                return;
-            }
-            
-            const newDPI = { nome, sap, categoria, scadenza: scadenza ? parseInt(scadenza) : null, note };
-            dpiList.push(newDPI);
-            localStorage.setItem('dpi', JSON.stringify(dpiList));
-            
-            // Pulisci i campi
-            document.getElementById('nome-dpi').value = '';
-            document.getElementById('codice-sap').value = '';
-            document.getElementById('categoria').value = '';
-            document.getElementById('scadenza').value = '';
-            document.getElementById('note-dpi').value = '';
-            
-            loadDPI();
-            alert('DPI aggiunto con successo!');
-        }
-
-        function selectDPI(index) {
-            const dpiList = JSON.parse(localStorage.getItem('dpi')) || [];
-            const dpi = dpiList[index];
-            
-            document.getElementById('nome-dpi').value = dpi.nome;
-            document.getElementById('codice-sap').value = dpi.sap;
-            document.getElementById('categoria').value = dpi.categoria;
-            document.getElementById('scadenza').value = dpi.scadenza || '';
-            document.getElementById('note-dpi').value = dpi.note || '';
-            
-            selectedDPIIndex = index;
-        }
-
-        function editDPI() {
-            if (selectedDPIIndex === -1) {
-                alert('Seleziona un DPI da modificare!');
-                return;
-            }
-            
-            const nome = document.getElementById('nome-dpi').value.trim();
-            const sap = document.getElementById('codice-sap').value.trim();
-            const categoria = document.getElementById('categoria').value;
-            const scadenza = document.getElementById('scadenza').value;
-            const note = document.getElementById('note-dpi').value.trim();
-            
-            if (!nome || !sap || !categoria) {
-                alert('Nome, codice SAP e categoria sono obbligatori!');
-                return;
-            }
-            
-            const dpiList = JSON.parse(localStorage.getItem('dpi')) || [];
-            
-            // Controlla se il codice SAP esiste già (escludendo il DPI corrente)
-            if (dpiList.some((d, i) => d.sap === sap && i !== selectedDPIIndex)) {
-                alert('Codice SAP già esistente!');
-                return;
-            }
-            
-            dpiList[selectedDPIIndex] = { nome, sap, categoria, scadenza: scadenza ? parseInt(scadenza) : null, note };
-            localStorage.setItem('dpi', JSON.stringify(dpiList));
-            
-            // Pulisci i campi
-            document.getElementById('nome-dpi').value = '';
-            document.getElementById('codice-sap').value = '';
-            document.getElementById('categoria').value = '';
-            document.getElementById('scadenza').value = '';
-            document.getElementById('note-dpi').value = '';
-            
-            selectedDPIIndex = -1;
-            loadDPI();
-            alert('DPI modificato con successo!');
-        }
-
-        function deleteDPI() {
-            if (selectedDPIIndex === -1) {
-                alert('Seleziona un DPI da cancellare!');
-                return;
-            }
-            
-            if (confirm('Sei sicuro di voler cancellare questo DPI?')) {
-                const dpiList = JSON.parse(localStorage.getItem('dpi')) || [];
-                dpiList.splice(selectedDPIIndex, 1);
-                localStorage.setItem('dpi', JSON.stringify(dpiList));
-                
-                // Pulisci i campi
-                document.getElementById('nome-dpi').value = '';
-                document.getElementById('codice-sap').value = '';
-                document.getElementById('categoria').value = '';
-                document.getElementById('scadenza').value = '';
-                document.getElementById('note-dpi').value = '';
-                
-                selectedDPIIndex = -1;
-                loadDPI();
-                alert('DPI cancellato con successo!');
-            }
-        }
-
-        function removeDPI(index) {
-            if (confirm('Sei sicuro di voler cancellare questo DPI?')) {
-                const dpiList = JSON.parse(localStorage.getItem('dpi')) || [];
-                dpiList.splice(index, 1);
-                localStorage.setItem('dpi', JSON.stringify(dpiList));
-                loadDPI();
-                alert('DPI cancellato con successo!');
-            }
-        }
-
-        // Funzioni per la gestione delle consegne
-        function loadWorkersForDelivery() {
-            const workers = JSON.parse(localStorage.getItem('lavoratori')) || [];
-            const select = document.getElementById('select-lavoratore');
-            select.innerHTML = '<option value="">Seleziona lavoratore</option>';
-            
-            workers.forEach(worker => {
-                const option = document.createElement('option');
-                option.value = worker.matricola;
-                option.textContent = `${worker.cognome} ${worker.nome} (${worker.matricola})`;
-                select.appendChild(option);
-            });
-        }
-
-        function loadDPIForDelivery() {
-            const dpiList = JSON.parse(localStorage.getItem('dpi')) || [];
-            const select = document.getElementById('select-dpi');
-            select.innerHTML = '<option value="">Seleziona DPI</option>';
-            
-            dpiList.forEach(dpi => {
-                const option = document.createElement('option');
-                option.value = dpi.sap;
-                option.textContent = `${dpi.nome} (${dpi.sap})`;
-                select.appendChild(option);
-            });
-        }
-
         function setTodayDate() {
             const today = new Date().toISOString().split('T')[0];
             document.getElementById('data-consegna').value = today;
         }
 
-        function loadWorkerDeliveries() {
-            const workerId = document.getElementById('select-lavoratore').value;
-            const existingDeliveriesDiv = document.getElementById('existing-deliveries');
-            const tableDiv = document.getElementById('worker-deliveries-table');
+        // Theme functions
+        function initTheme() {
+            const savedTheme = localStorage.getItem('theme') || 'light';
+            document.documentElement.setAttribute('data-theme', savedTheme);
+            updateThemeToggle(savedTheme);
             
-            if (!workerId) {
-                existingDeliveriesDiv.style.display = 'none';
-                return;
-            }
-            
-            const deliveries = JSON.parse(localStorage.getItem('consegne')) || [];
-            const dpiList = JSON.parse(localStorage.getItem('dpi')) || [];
-            const workerDeliveries = deliveries.filter(d => d.lavoratore === workerId);
-            
-            if (workerDeliveries.length === 0) {
-                existingDeliveriesDiv.style.display = 'none';
-                return;
-            }
-            
-            let tableHtml = `
-                <table>
-                    <thead>
-                        <tr>
-                            <th>DPI</th>
-                            <th>Codice SAP</th>
-                            <th>Quantità</th>
-                            <th>Data</th>
-                            <th>Motivo</th>
-                            <th>Firma Preposto</th>
-                            <th>Firma Lavoratore</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-            `;
-            
-            workerDeliveries.forEach(delivery => {
-                const firmaPreposto = delivery.firmaPreposto ? `<img src="${delivery.firmaPreposto}" class="signature-preview" alt="Firma Preposto">` : '-';
-                const firmaLavoratore = delivery.firmaLavoratore ? `<img src="${delivery.firmaLavoratore}" class="signature-preview" alt="Firma Lavoratore">` : '-';
-                
-                // Trova il codice SAP del DPI
-                const dpi = dpiList.find(d => d.nome === delivery.dpiText);
-                const codiceSAP = dpi ? dpi.sap : 'N/A';
-                
-                tableHtml += `
-                    <tr>
-                        <td>${delivery.dpiText}</td>
-                        <td><strong>${codiceSAP}</strong></td>
-                        <td>${delivery.quantita}</td>
-                        <td>${delivery.data}</td>
-                        <td>${getReasonText(delivery.motivo)}</td>
-                        <td>${firmaPreposto}</td>
-                        <td>${firmaLavoratore}</td>
-                    </tr>
-                `;
-            });
-            
-            tableHtml += '</tbody></table>';
-            tableDiv.innerHTML = tableHtml;
-            existingDeliveriesDiv.style.display = 'block';
-        }
-
-        function getReasonText(reason) {
-            switch(reason) {
-                case 'primo': return 'Primo Prelievo';
-                case 'danneggiato': return 'Danneggiato';
-                case 'scaduto': return 'Scaduto';
-                default: return reason;
-            }
-        }
-
-        function addToDelivery() {
-            try {
-                // Validazione
-                let isValid = true;
-                const errorMessages = {
-                    lavoratore: document.getElementById('error-lavoratore'),
-                    dpi: document.getElementById('error-dpi'),
-                    quantita: document.getElementById('error-quantita'),
-                    data: document.getElementById('error-data'),
-                    firmaPreposto: document.getElementById('error-firma-preposto'),
-                    firmaLavoratore: document.getElementById('error-firma-lavoratore')
-                };
-
-                // Pulisci errori precedenti
-                Object.values(errorMessages).forEach(el => el.textContent = '');
-
-                const lavoratore = document.getElementById('select-lavoratore').value;
-                const dpi = document.getElementById('select-dpi').value;
-                const quantita = parseInt(document.getElementById('quantita').value);
-                const data = document.getElementById('data-consegna').value;
-                const motivo = document.getElementById('motivo').value;
-
-                if (!lavoratore) {
-                    errorMessages.lavoratore.textContent = 'Seleziona un lavoratore';
-                    isValid = false;
-                }
-
-                if (!dpi) {
-                    errorMessages.dpi.textContent = 'Seleziona un DPI';
-                    isValid = false;
-                }
-
-                if (!quantita || quantita < 1) {
-                    errorMessages.quantita.textContent = 'Inserisci una quantità valida';
-                    isValid = false;
-                }
-
-                if (!data) {
-                    errorMessages.data.textContent = 'Seleziona una data';
-                    isValid = false;
-                }
-
-                // Verifica firme
-                const canvasPreposto = document.getElementById('firma-preposto');
-                const canvasLavoratore = document.getElementById('firma-lavoratore');
-
-                if (!hasSignedPreposto || isCanvasEmpty(canvasPreposto)) {
-                    errorMessages.firmaPreposto.textContent = 'Firma del preposto richiesta';
-                    isValid = false;
-                }
-
-                if (!hasSignedLavoratore || isCanvasEmpty(canvasLavoratore)) {
-                    errorMessages.firmaLavoratore.textContent = 'Firma del lavoratore richiesta';
-                    isValid = false;
-                }
-
-                if (!isValid) {
-                    return;
-                }
-
-                // Ottieni i nomi per la visualizzazione
-                const workers = JSON.parse(localStorage.getItem('lavoratori')) || [];
-                const dpiList = JSON.parse(localStorage.getItem('dpi')) || [];
-                
-                const worker = workers.find(w => w.matricola === lavoratore);
-                const dpiItem = dpiList.find(d => d.sap === dpi);
-                
-                const lavoratoreText = worker ? `${worker.cognome} ${worker.nome}` : lavoratore;
-                const dpiText = dpiItem ? dpiItem.nome : dpi;
-                
-                // Dati completi del lavoratore per la stampa
-                const workerData = worker ? {
-                    nome: worker.nome,
-                    cognome: worker.cognome,
-                    matricola: worker.matricola,
-                    reparto: worker.reparto || '',
-                    mansione: worker.mansione || ''
-                } : null;
-
-                // Converti le firme in base64
-                const firmaPreposto = canvasPreposto.toDataURL();
-                const firmaLavoratore = canvasLavoratore.toDataURL();
-
-                // Aggiungi alla consegna corrente
-                const deliveryItem = {
-                    lavoratore,
-                    lavoratoreText,
-                    workerData, // Dati completi del lavoratore
-                    dpi,
-                    dpiText,
-                    quantita,
-                    data,
-                    motivo,
-                    firmaPreposto,
-                    firmaLavoratore
-                };
-
-                currentDelivery.push(deliveryItem);
-                renderDeliveryTable();
-
-                // Reset delle firme
-                clearSignature('firma-preposto');
-                clearSignature('firma-lavoratore');
-
-                alert('Item aggiunto alla consegna!');
-
-            } catch (error) {
-                console.error('Errore in addToDelivery:', error);
-                alert('Si è verificato un errore durante l\'aggiunta dell\'item alla consegna.');
-            }
-        }
-
-        function renderDeliveryTable() {
-            const tbody = document.getElementById('delivery-table-body');
-            tbody.innerHTML = '';
-
-            currentDelivery.forEach((item, index) => {
-                const row = tbody.insertRow();
-                // Mostra nome e cognome se disponibili
-                const workerDisplay = item.workerData ? 
-                    `${item.workerData.cognome} ${item.workerData.nome} (${item.workerData.matricola})` : 
-                    item.lavoratoreText;
-                
-                row.innerHTML = `
-                    <td>${workerDisplay}</td>
-                    <td>${item.dpiText}</td>
-                    <td>${item.dpi}</td>
-                    <td>${item.quantita}</td>
-                    <td>${item.data}</td>
-                    <td>${getReasonText(item.motivo)}</td>
-                    <td><img src="${item.firmaPreposto}" class="signature-preview" alt="Firma Preposto"></td>
-                    <td><img src="${item.firmaLavoratore}" class="signature-preview" alt="Firma Lavoratore"></td>
-                    <td>
-                        <button class="btn danger" onclick="removeFromDelivery(${index})">🗑️</button>
-                    </td>
-                `;
-            });
-        }
-
-        function removeFromDelivery(index) {
-            if (confirm('Rimuovere questo item dalla consegna?')) {
-                currentDelivery.splice(index, 1);
-                renderDeliveryTable();
-            }
-        }
-
-        function saveDelivery() {
-            try {
-                if (currentDelivery.length === 0) {
-                    alert('Nessun item da salvare nella consegna!');
-                    return;
-                }
-
-                // Salva la consegna nel localStorage
-                let consegneSalvate = JSON.parse(localStorage.getItem('consegne')) || [];
-                // Aggiungi i nuovi item di currentDelivery a quelli salvati
-                consegneSalvate = consegneSalvate.concat(currentDelivery);
-                localStorage.setItem('consegne', JSON.stringify(consegneSalvate));
-                
-                // Reset currentDelivery e aggiorna la tabella
-                currentDelivery = [];
-                renderDeliveryTable(); 
-                
-                alert('Consegna salvata con successo!');
-                
-                // Aggiorna le consegne precedenti del lavoratore
-                loadWorkerDeliveries();
-
-            } catch (error) {
-                console.error('Errore in saveDelivery:', error);
-                alert('Si è verificato un errore durante il salvataggio della consegna.');
-            }
-        }
-
-        // Funzioni per la ricerca
-        function updateSearchFields() {
-            const searchType = document.getElementById('search-type').value;
-            const searchTerm = document.getElementById('search-term');
-            
-            switch(searchType) {
-                case 'lavoratori':
-                    searchTerm.placeholder = 'Nome, cognome, matricola o reparto';
-                    break;
-                case 'dpi':
-                    searchTerm.placeholder = 'Nome DPI, codice SAP o categoria';
-                    break;
-                case 'consegne':
-                    searchTerm.placeholder = 'Matricola lavoratore o codice SAP DPI';
-                    break;
-            }
-        }
-
-        function performSearch() {
-            const searchType = document.getElementById('search-type').value;
-            const searchTerm = document.getElementById('search-term').value.toLowerCase().trim();
-            
-            if (!searchTerm) {
-                alert('Inserisci un termine di ricerca!');
-                return;
-            }
-            
-            let results = [];
-            
-            switch(searchType) {
-                case 'lavoratori':
-                    const workers = JSON.parse(localStorage.getItem('lavoratori')) || [];
-                    results = workers.filter(worker => 
-                        worker.nome.toLowerCase().includes(searchTerm) ||
-                        worker.cognome.toLowerCase().includes(searchTerm) ||
-                        worker.matricola.toLowerCase().includes(searchTerm) ||
-                        (worker.reparto && worker.reparto.toLowerCase().includes(searchTerm))
-                    );
-                    displayWorkersResults(results);
-                    break;
-                    
-                case 'dpi':
-                    const dpiList = JSON.parse(localStorage.getItem('dpi')) || [];
-                    results = dpiList.filter(dpi => 
-                        dpi.nome.toLowerCase().includes(searchTerm) ||
-                        dpi.sap.toLowerCase().includes(searchTerm) ||
-                        dpi.categoria.toLowerCase().includes(searchTerm)
-                    );
-                    displayDPIResults(results);
-                    break;
-                    
-                case 'consegne':
-                    const deliveries = JSON.parse(localStorage.getItem('consegne')) || [];
-                    results = deliveries.filter(delivery => 
-                        delivery.lavoratore.toLowerCase().includes(searchTerm) ||
-                        delivery.dpi.toLowerCase().includes(searchTerm) ||
-                        (delivery.dpiText && delivery.dpiText.toLowerCase().includes(searchTerm))
-                    );
-                    displayDeliveriesResults(results);
-                    break;
-            }
-            
-            document.getElementById('search-results').style.display = 'block';
-            document.getElementById('search-actions').style.display = 'none';
-        }
-
-        function showAllDeliveriesInSearch() {
-            const deliveries = JSON.parse(localStorage.getItem('consegne')) || [];
-            const dpiList = JSON.parse(localStorage.getItem('dpi')) || [];
-            const content = document.getElementById('search-results-content');
-            
-            if (deliveries.length === 0) {
-                content.innerHTML = '<p>Nessuna consegna trovata.</p>';
-                document.getElementById('search-results').style.display = 'block';
-                document.getElementById('search-actions').style.display = 'none';
-                return;
-            }
-            
-            let html = `
-                <table>
-                    <thead>
-                        <tr>
-                            <th><input type="checkbox" id="select-all-search" onclick="toggleSelectAllSearch()"></th>
-                            <th>Lavoratore</th>
-                            <th>DPI</th>
-                            <th>Cod.SAP</th>
-                            <th>Quantità</th>
-                            <th>Data</th>
-                            <th>Motivo</th>
-                            <th>Firma Preposto</th>
-                            <th>Firma Lavoratore</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-            `;
-            
-            deliveries.forEach((delivery, index) => {
-                const firmaPreposto = delivery.firmaPreposto ? `<img src="${delivery.firmaPreposto}" class="signature-preview" alt="Firma Preposto">` : '-';
-                const firmaLavoratore = delivery.firmaLavoratore ? `<img src="${delivery.firmaLavoratore}" class="signature-preview" alt="Firma Lavoratore">` : '-';
-                
-                // Trova il codice SAP del DPI
-                const dpi = dpiList.find(d => d.nome === (delivery.dpiText || delivery.dpi));
-                const codiceSAP = dpi ? dpi.sap : 'N/A';
-                
-                html += `
-                    <tr>
-                        <td><input type="checkbox" class="delivery-checkbox-search" data-index="${index}"></td>
-                        <td>${delivery.lavoratoreText || delivery.lavoratore}</td>
-                        <td>${delivery.dpiText || delivery.dpi}</td>
-                        <td>${codiceSAP}</td>
-                        <td>${delivery.quantita}</td>
-                        <td>${delivery.data}</td>
-                        <td>${getReasonText(delivery.motivo)}</td>
-                        <td>${firmaPreposto}</td>
-                        <td>${firmaLavoratore}</td>
-                    </tr>
-                `;
-            });
-            
-            html += '</tbody></table>';
-            content.innerHTML = html;
-            document.getElementById('search-results').style.display = 'block';
-            document.getElementById('search-actions').style.display = 'block';
-        }
-
-        function toggleSelectAllSearch() {
-            const selectAll = document.getElementById('select-all-search');
-            const checkboxes = document.querySelectorAll('.delivery-checkbox-search');
-            
-            checkboxes.forEach(checkbox => {
-                checkbox.checked = selectAll.checked;
-            });
-        }
-
-        function getSelectedDeliveryIndexes() {
-            const indexes = [];
-            document.querySelectorAll('.delivery-checkbox-search:checked').forEach(checkbox => {
-                indexes.push(parseInt(checkbox.getAttribute('data-index')));
-            });
-            return indexes;
-        }
-
-        function deleteSelectedDeliveries() {
-            const selectedIndexes = getSelectedDeliveryIndexes();
-            
-            if (selectedIndexes.length === 0) {
-                alert('Seleziona almeno una consegna da cancellare!');
-                return;
-            }
-            
-            if (confirm(`Sei sicuro di voler cancellare ${selectedIndexes.length} consegna/e selezionata/e?`)) {
-                const deliveries = JSON.parse(localStorage.getItem('consegne')) || [];
-                // Rimuovi in ordine decrescente per evitare problemi con gli indici
-                selectedIndexes.sort((a, b) => b - a).forEach(index => {
-                    deliveries.splice(index, 1);
-                });
-                localStorage.setItem('consegne', JSON.stringify(deliveries));
-                showAllDeliveriesInSearch();
-                alert('Consegne cancellate con successo!');
-            }
-        }
-
-        function displayWorkersResults(results) {
-            const content = document.getElementById('search-results-content');
-            
-            if (results.length === 0) {
-                content.innerHTML = '<p>Nessun lavoratore trovato.</p>';
-                return;
-            }
-            
-            let html = `
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Nome</th>
-                            <th>Cognome</th>
-                            <th>Matricola</th>
-                            <th>Reparto</th>
-                            <th>Mansione</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-            `;
-            
-            results.forEach(worker => {
-                html += `
-                    <tr>
-                        <td>${worker.nome}</td>
-                        <td>${worker.cognome}</td>
-                        <td>${worker.matricola}</td>
-                        <td>${worker.reparto || '-'}</td>
-                        <td>${worker.mansione || '-'}</td>
-                    </tr>
-                `;
-            });
-            
-            html += '</tbody></table>';
-            content.innerHTML = html;
-        }
-
-        function displayDPIResults(results) {
-            const content = document.getElementById('search-results-content');
-            
-            if (results.length === 0) {
-                content.innerHTML = '<p>Nessun DPI trovato.</p>';
-                return;
-            }
-            
-            let html = `
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Nome</th>
-                            <th>Codice SAP</th>
-                            <th>Categoria</th>
-                            <th>Scadenza (mesi)</th>
-                            <th>Note</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-            `;
-            
-            results.forEach(dpi => {
-                html += `
-                    <tr>
-                        <td>${dpi.nome}</td>
-                        <td>${dpi.sap}</td>
-                        <td>${dpi.categoria}</td>
-                        <td>${dpi.scadenza || '-'}</td>
-                        <td>${dpi.note || '-'}</td>
-                    </tr>
-                `;
-            });
-            
-            html += '</tbody></table>';
-            content.innerHTML = html;
-        }
-
-        function displayDeliveriesResults(results) {
-            const content = document.getElementById('search-results-content');
-            
-            if (results.length === 0) {
-                content.innerHTML = '<p>Nessuna consegna trovata.</p>';
-                return;
-            }
-            
-            let html = `
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Lavoratore</th>
-                            <th>DPI</th>
-                            <th>Quantità</th>
-                            <th>Data</th>
-                            <th>Motivo</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-            `;
-            
-            results.forEach(delivery => {
-                html += `
-                    <tr>
-                        <td>${delivery.lavoratore}</td>
-                        <td>${delivery.dpiText || delivery.dpi}</td>
-                        <td>${delivery.quantita}</td>
-                        <td>${delivery.data}</td>
-                        <td>${getReasonText(delivery.motivo)}</td>
-                    </tr>
-                `;
-            });
-            
-            html += '</tbody></table>';
-            content.innerHTML = html;
-        }
-
-        function clearSearch() {
-            document.getElementById('search-term').value = '';
-            document.getElementById('search-results').style.display = 'none';
-            document.getElementById('search-actions').style.display = 'none';
-        }
-
-        // Funzioni per le impostazioni
-        function loadSettings() {
-            const settings = JSON.parse(localStorage.getItem('appSettings')) || {};
-            
-            if (settings.companyName) {
-                document.getElementById('company-name').value = settings.companyName;
-            }
-            
-            if (settings.useLogoOnPrint !== undefined) {
-                document.getElementById('use-logo-print').checked = settings.useLogoOnPrint;
-            }
-            
-            // Carica impostazione tema
+            // Update checkbox in settings
             const darkModeToggle = document.getElementById('dark-mode-toggle');
             if (darkModeToggle) {
-                const currentTheme = localStorage.getItem('theme') || 'light';
-                darkModeToggle.checked = currentTheme === 'dark';
+                darkModeToggle.checked = savedTheme === 'dark';
             }
         }
 
-        function saveSettings() {
-            const companyName = document.getElementById('company-name').value.trim();
-            const useLogoOnPrint = document.getElementById('use-logo-print').checked;
-            const logoFile = document.getElementById('company-logo').files[0];
+        function toggleTheme() {
+            const currentTheme = document.documentElement.getAttribute('data-theme');
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
             
-            const settings = JSON.parse(localStorage.getItem('appSettings')) || {};
+            document.documentElement.setAttribute('data-theme', newTheme);
+            localStorage.setItem('theme', newTheme);
+            updateThemeToggle(newTheme);
             
-            if (companyName) {
-                settings.companyName = companyName;
-            }
-            
-            settings.useLogoOnPrint = useLogoOnPrint;
-            
-            if (logoFile) {
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    settings.logo = e.target.result;
-                    localStorage.setItem('appSettings', JSON.stringify(settings));
-                    alert('Impostazioni salvate con successo!');
-                };
-                reader.readAsDataURL(logoFile);
-            } else {
-                localStorage.setItem('appSettings', JSON.stringify(settings));
-                alert('Impostazioni salvate con successo!');
+            // Update checkbox in settings
+            const darkModeToggle = document.getElementById('dark-mode-toggle');
+            if (darkModeToggle) {
+                darkModeToggle.checked = newTheme === 'dark';
             }
         }
 
+        function toggleDarkMode() {
+            const darkModeToggle = document.getElementById('dark-mode-toggle');
+            const newTheme = darkModeToggle.checked ? 'dark' : 'light';
+            
+            document.documentElement.setAttribute('data-theme', newTheme);
+            localStorage.setItem('theme', newTheme);
+            updateThemeToggle(newTheme);
+        }
+
+        function updateThemeToggle(theme) {
+            const themeToggle = document.querySelector('.theme-toggle');
+            if (themeToggle) {
+                themeToggle.textContent = theme === 'dark' ? '☀️' : '🌙';
+                themeToggle.title = theme === 'dark' ? 'Modalità chiara' : 'Modalità scura';
+            }
+        }
+
+        // Utility functions
+        function showSection(sectionId) {
+            // Hide all sections
+            const sections = document.querySelectorAll('.section');
+            sections.forEach(section => section.classList.remove('active'));
+            
+            // Show selected section
+            document.getElementById(sectionId).classList.add('active');
+            
+            // Initialize specific section
+            switch(sectionId) {
+                case 'lavoratori-section':
+                    updateWorkersTable();
+                    break;
+                case 'dpi-section':
+                    updateDPITable();
+                    break;
+                case 'consegna-section':
+                    updateWorkersDropdowns();
+                    updateDPIDropdowns();
+                    setTodayDate();
+                    // Initialize signature canvases with a small delay
+                    setTimeout(() => {
+                        initSignatureCanvases();
+                    }, 100);
+                    break;
+                case 'stampa-section':
+                    updateWorkersDropdowns();
+                    updateDepartmentsDropdown();
+                    break;
+                case 'cerca-section':
+                    updateSearchFields();
+                    break;
+                case 'impostazioni-section':
+                    updateSettingsUI();
+                    break;
+            }
+        }
+
+        // Placeholder functions for features not yet implemented
         function exportData() {
-            try {
-                const data = {
-                    lavoratori: JSON.parse(localStorage.getItem('lavoratori')) || [],
-                    dpi: JSON.parse(localStorage.getItem('dpi')) || [],
-                    consegne: JSON.parse(localStorage.getItem('consegne')) || [],
-                    settings: JSON.parse(localStorage.getItem('appSettings')) || {}
-                };
-                
-                const dataStr = JSON.stringify(data, null, 2);
-                const dataBlob = new Blob([dataStr], {type: 'application/json'});
-                
-                const link = document.createElement('a');
-                link.href = URL.createObjectURL(dataBlob);
-                link.download = `gestione_dpi_backup_${new Date().toISOString().split('T')[0]}.json`;
-                link.click();
-                
-                alert('Dati esportati con successo!');
-            } catch (error) {
-                console.error('Errore durante l\'esportazione:', error);
-                alert('Errore durante l\'esportazione dei dati.');
-            }
+            alert('Funzione di esportazione dati non ancora implementata');
         }
 
         function importData() {
-            const input = document.createElement('input');
-            input.type = 'file';
-            input.accept = '.json';
-            
-            input.onchange = function(e) {
-                const file = e.target.files[0];
-                if (!file) return;
-                
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    try {
-                        const data = JSON.parse(e.target.result);
-                        
-                        if (confirm('Importare i dati? Questo sovrascriverà tutti i dati esistenti!')) {
-                            if (data.lavoratori) localStorage.setItem('lavoratori', JSON.stringify(data.lavoratori));
-                            if (data.dpi) localStorage.setItem('dpi', JSON.stringify(data.dpi));
-                            if (data.consegne) localStorage.setItem('consegne', JSON.stringify(data.consegne));
-                            if (data.settings) localStorage.setItem('appSettings', JSON.stringify(data.settings));
-                            
-                            alert('Dati importati con successo! Ricarica la pagina per vedere le modifiche.');
-                            location.reload();
-                        }
-                    } catch (error) {
-                        console.error('Errore durante l\'importazione:', error);
-                        alert('Errore durante l\'importazione: file non valido.');
-                    }
-                };
-                reader.readAsText(file);
-            };
-            
-            input.click();
+            alert('Funzione di importazione dati non ancora implementata');
         }
 
         function clearAllData() {
-            if (confirm('Sei sicuro di voler cancellare TUTTI i dati? Questa operazione non può essere annullata!')) {
-                if (confirm('ULTIMA CONFERMA: Tutti i lavoratori, DPI e consegne saranno cancellati definitivamente!')) {
-                    localStorage.removeItem('lavoratori');
-                    localStorage.removeItem('dpi');
-                    localStorage.removeItem('consegne');
-                    localStorage.removeItem('appSettings');
-                    
-                    alert('Tutti i dati sono stati cancellati!');
-                    location.reload();
-                }
+            if (confirm('Sei sicuro di voler cancellare tutti i dati? Questa operazione non può essere annullata!')) {
+                // Implementation for clearing all data
+                alert('Funzione di cancellazione dati non ancora implementata');
             }
         }
 
-        // Funzioni per la stampa
-        function loadWorkersForPrint() {
-            const workers = JSON.parse(localStorage.getItem('lavoratori')) || [];
-            const select = document.getElementById('select-lavoratore-stampa');
-            select.innerHTML = '<option value="">Seleziona lavoratore</option>';
-            
-            workers.forEach(worker => {
-                const option = document.createElement('option');
-                option.value = worker.matricola;
-                option.textContent = `${worker.cognome} ${worker.nome} (${worker.matricola})`;
-                select.appendChild(option);
-            });
+        function importWorkersCSV() {
+            alert('Funzione di importazione CSV lavoratori non ancora implementata');
         }
 
-        function loadDepartments() {
-            const workers = JSON.parse(localStorage.getItem('lavoratori')) || [];
-            const departments = [...new Set(workers.map(w => w.reparto).filter(r => r))];
-            const select = document.getElementById('select-reparto');
-            
-            // Mantieni "Tutti i reparti" come prima opzione
-            select.innerHTML = '<option value="tutti">Tutti i reparti</option>';
-            
-            departments.forEach(dept => {
-                const option = document.createElement('option');
-                option.value = dept;
-                option.textContent = dept;
-                select.appendChild(option);
-            });
+        function importDPICSV() {
+            alert('Funzione di importazione CSV DPI non ancora implementata');
         }
 
-        function updateDeliveryPreview() {
-            const workerId = document.getElementById('select-lavoratore-stampa').value;
-            const dataInizio = document.getElementById('data-inizio').value;
-            const dataFine = document.getElementById('data-fine').value;
-            const previewContent = document.getElementById('delivery-preview-content');
-            
-            if (!workerId) {
-                previewContent.innerHTML = '<tr><td colspan="9">Seleziona un lavoratore per visualizzare le consegne.</td></tr>';
-                return;
-            }
-            
-            const deliveries = JSON.parse(localStorage.getItem('consegne')) || [];
-            const dpiList = JSON.parse(localStorage.getItem('dpi')) || [];
-            const workers = JSON.parse(localStorage.getItem('lavoratori')) || [];
-            let filteredDeliveries = deliveries.filter(d => d.lavoratore === workerId);
-            
-            // Filtra per data se specificata
-            if (dataInizio) {
-                filteredDeliveries = filteredDeliveries.filter(d => d.data >= dataInizio);
-            }
-            if (dataFine) {
-                filteredDeliveries = filteredDeliveries.filter(d => d.data <= dataFine);
-            }
-            
-            if (filteredDeliveries.length === 0) {
-                previewContent.innerHTML = '<tr><td colspan="9">Nessuna consegna trovata per i criteri selezionati.</td></tr>';
-                return;
-            }
-            
-            let html = '';
-            
-            filteredDeliveries.forEach((delivery, index) => {
-                const firmaPreposto = delivery.firmaPreposto ? `<img src="${delivery.firmaPreposto}" class="signature-preview" alt="Firma Preposto">` : '-';
-                const firmaLavoratore = delivery.firmaLavoratore ? `<img src="${delivery.firmaLavoratore}" class="signature-preview" alt="Firma Lavoratore">` : '-';
-                
-                // Trova il codice SAP del DPI
-                const dpi = dpiList.find(d => d.nome === (delivery.dpiText || delivery.dpi));
-                const codiceSAP = dpi ? dpi.sap : 'N/A';
-                
-                // Trova i dati del lavoratore per mostrare nome e cognome
-                let lavoratoreDisplay = delivery.lavoratoreText || delivery.lavoratore;
-                if (delivery.workerData) {
-                    lavoratoreDisplay = `${delivery.workerData.cognome} ${delivery.workerData.nome} (${delivery.workerData.matricola})`;
-                } else {
-                    // Fallback: cerca il lavoratore nei dati salvati
-                    const worker = workers.find(w => w.matricola === delivery.lavoratore);
-                    if (worker) {
-                        lavoratoreDisplay = `${worker.cognome} ${worker.nome} (${worker.matricola})`;
-                    }
-                }
-                
-                html += `
-                    <tr>
-                        <td><input type="checkbox" class="delivery-checkbox" data-index="${index}"></td>
-                        <td>${lavoratoreDisplay}</td>
-                        <td>${delivery.dpiText || delivery.dpi}</td>
-                        <td><strong>${codiceSAP}</strong></td>
-                        <td>${delivery.quantita}</td>
-                        <td>${delivery.data}</td>
-                        <td>${getReasonText(delivery.motivo)}</td>
-                        <td>${firmaPreposto}</td>
-                        <td>${firmaLavoratore}</td>
-                    </tr>
-                `;
-            });
-            
-            previewContent.innerHTML = html;
+        function deleteSelectedDeliveries() {
+            alert('Funzione di cancellazione consegne selezionate non ancora implementata');
         }
 
-        function showAllDeliveries() {
-            const deliveries = JSON.parse(localStorage.getItem('consegne')) || [];
-            const dpiList = JSON.parse(localStorage.getItem('dpi')) || [];
-            const workers = JSON.parse(localStorage.getItem('lavoratori')) || [];
-            const previewContent = document.getElementById('delivery-preview-content');
-            
-            if (deliveries.length === 0) {
-                previewContent.innerHTML = '<tr><td colspan="9">Nessuna consegna trovata.</td></tr>';
-                return;
-            }
-            
-            let html = '';
-            
-            deliveries.forEach((delivery, index) => {
-                const firmaPreposto = delivery.firmaPreposto ? `<img src="${delivery.firmaPreposto}" class="signature-preview" alt="Firma Preposto">` : '-';
-                const firmaLavoratore = delivery.firmaLavoratore ? `<img src="${delivery.firmaLavoratore}" class="signature-preview" alt="Firma Lavoratore">` : '-';
-                
-                // Trova il codice SAP del DPI
-                const dpi = dpiList.find(d => d.nome === (delivery.dpiText || delivery.dpi));
-                const codiceSAP = dpi ? dpi.sap : 'N/A';
-                
-                // Trova i dati del lavoratore per mostrare nome e cognome
-                let lavoratoreDisplay = delivery.lavoratoreText || delivery.lavoratore;
-                if (delivery.workerData) {
-                    lavoratoreDisplay = `${delivery.workerData.cognome} ${delivery.workerData.nome} (${delivery.workerData.matricola})`;
-                } else {
-                    // Fallback: cerca il lavoratore nei dati salvati
-                    const worker = workers.find(w => w.matricola === delivery.lavoratore);
-                    if (worker) {
-                        lavoratoreDisplay = `${worker.cognome} ${worker.nome} (${worker.matricola})`;
-                    }
-                }
-                
-                html += `
-                    <tr>
-                        <td><input type="checkbox" class="delivery-checkbox" data-index="${index}"></td>
-                        <td>${lavoratoreDisplay}</td>
-                        <td>${delivery.dpiText || delivery.dpi}</td>
-                        <td><strong>${codiceSAP}</strong></td>
-                        <td>${delivery.quantita}</td>
-                        <td>${delivery.data}</td>
-                        <td>${getReasonText(delivery.motivo)}</td>
-                        <td>${firmaPreposto}</td>
-                        <td>${firmaLavoratore}</td>
-                    </tr>
-                `;
-            });
-            
-            previewContent.innerHTML = html;
-        }
-
-        function toggleSelectAll() {
-            const selectAll = document.getElementById('select-all');
-            const checkboxes = document.querySelectorAll('.delivery-checkbox');
-            
-            checkboxes.forEach(checkbox => {
-                checkbox.checked = selectAll.checked;
-            });
-        }
-
-        function getSelectedDeliveries() {
-            const deliveries = JSON.parse(localStorage.getItem('consegne')) || [];
-            const selectedDeliveries = [];
-            
-            document.querySelectorAll('.delivery-checkbox:checked').forEach(checkbox => {
-                const index = parseInt(checkbox.getAttribute('data-index'));
-                if (deliveries[index]) {
-                    selectedDeliveries.push(deliveries[index]);
-                }
-            });
-            
-            return selectedDeliveries.length > 0 ? selectedDeliveries : deliveries;
-        }
-
-        function anteprimaPDF(type) {
-            try {
-                document.getElementById('loading').style.display = 'block';
-                
-                // Inizializza jsPDF
-                const { jsPDF } = window.jspdf;
-                const doc = new jsPDF();
-                
-                // Ottieni le impostazioni dell'azienda
-                const settings = JSON.parse(localStorage.getItem('appSettings')) || {};
-                const companyName = settings.companyName || 'Azienda';
-                
-                // Imposta il titolo del documento
-                let title = '';
-                let filename = '';
-                
-                switch(type) {
-                    case 'consegne':
-                        title = 'Registro Consegne DPI';
-                        filename = 'consegne_dpi';
-                        generateDeliveryPDF(doc, title, companyName, getSelectedDeliveries());
-                        break;
-                    case 'lavoratori':
-                        title = 'Elenco Lavoratori';
-                        filename = 'elenco_lavoratori';
-                        generateWorkersPDF(doc, title, companyName);
-                        break;
-                    case 'dpi':
-                        title = 'Elenco DPI';
-                        filename = 'elenco_dpi';
-                        generateDPIPDF(doc, title, companyName);
-                        break;
-                }
-                
-                // Salva il PDF
-                currentPdfDoc = doc;
-                currentPdfName = `${filename}_${new Date().toISOString().split('T')[0]}.pdf`;
-                
-                // Mostra l'anteprima
-                const pdfBlob = doc.output('blob');
-                const pdfUrl = URL.createObjectURL(pdfBlob);
-                
-                document.getElementById('pdf-preview-iframe').src = pdfUrl;
-                document.getElementById('pdf-preview-modal').style.display = 'block';
-                
-                document.getElementById('loading').style.display = 'none';
-                
-            } catch (error) {
-                console.error('Errore nella generazione del PDF:', error);
-                alert('Errore nella generazione del PDF: ' + error.message);
-                document.getElementById('loading').style.display = 'none';
-            }
-        }
-
-        function generateDeliveryPDF(doc, title, companyName, deliveriesToPrint) {
-            const settings = JSON.parse(localStorage.getItem('appSettings')) || {};
-            const dpiList = JSON.parse(localStorage.getItem('dpi')) || [];
-            const workers = JSON.parse(localStorage.getItem('lavoratori')) || [];
-            
-            // Header con logo a sinistra e nome azienda a destra
-            if (settings.logo && settings.useLogoOnPrint) {
-                try {
-                    doc.addImage(settings.logo, 'JPEG', 20, 10, 30, 20);
-                } catch (error) {
-                    console.warn('Errore nel caricamento del logo:', error);
-                }
-            }
-            
-            // Nome azienda a destra
-            doc.setFontSize(20);
-            const pageWidth = doc.internal.pageSize.getWidth();
-            const companyNameWidth = doc.getTextWidth(companyName);
-            doc.text(companyName, pageWidth - companyNameWidth - 20, 20);
-            
-            // Titolo centrato
-            doc.setFontSize(16);
-            const titleWidth = doc.getTextWidth(title);
-            doc.text(title, (pageWidth - titleWidth) / 2, 35);
-            
-            // Dati del lavoratore selezionato o data di generazione
-            doc.setFontSize(10);
-            const selectedWorkerId = document.getElementById('select-lavoratore-stampa').value;
-            if (selectedWorkerId) {
-                const selectedWorker = workers.find(w => w.matricola === selectedWorkerId);
-                if (selectedWorker) {
-                    doc.text(`Nome: ${selectedWorker.nome} ${selectedWorker.cognome}`, 20, 45);
-                    doc.text(`Matricola: ${selectedWorker.matricola}`, 20, 52);
-                    if (selectedWorker.reparto) doc.text(`Reparto: ${selectedWorker.reparto}`, 20, 59);
-                    if (selectedWorker.mansione) doc.text(`Mansione: ${selectedWorker.mansione}`, 20, 66);
-                } else {
-                    doc.text(`Generato il: ${new Date().toLocaleDateString('it-IT')}`, 20, 45);
-                }
-            } else {
-                doc.text(`Generato il: ${new Date().toLocaleDateString('it-IT')}`, 20, 45);
-            }
-            
-            if (deliveriesToPrint.length === 0) {
-                doc.text('Nessuna consegna trovata.', 20, 75);
-                return;
-            }
-            
-            // Tabella delle consegne
-            let y = selectedWorkerId && workers.find(w => w.matricola === selectedWorkerId) ? 75 : 65;
-            
-            // Header della tabella
-            doc.setFontSize(8);
-            doc.setFont(undefined, 'bold');
-            doc.text('DPI', 20, y);
-            doc.text('Cod.SAP', 60, y);
-            doc.text('Qtà', 95, y);
-            doc.text('Data', 110, y);
-            doc.text('Motivo', 135, y);
-            doc.text('Firma Preposto', 160, y);
-            doc.text('Firma Lavoratore', 185, y);
-            
-            // Linea sotto l'header
-            doc.line(20, y + 2, 200, y + 2);
-            
-            y += 12;
-            doc.setFont(undefined, 'normal');
-            
-            deliveriesToPrint.forEach((delivery, index) => {
-                if (y > 240) { // Nuova pagina se necessario
-                    doc.addPage();
-                    y = 20;
-                }
-                
-                // Trova il codice SAP del DPI
-                const dpi = dpiList.find(d => d.nome === (delivery.dpiText || delivery.dpi));
-                const codiceSAP = dpi ? dpi.sap : 'N/A';
-                
-                // Stampa i dati della consegna
-                doc.text((delivery.dpiText || delivery.dpi).substring(0, 18), 20, y);
-                doc.text(codiceSAP.substring(0, 15), 60, y);
-                doc.text(delivery.quantita.toString(), 95, y);
-                doc.text(delivery.data, 110, y);
-                doc.text(getReasonText(delivery.motivo).substring(0, 12), 135, y);
-                
-                // Aggiungi firme se presenti
-                if (delivery.firmaPreposto) {
-                    try {
-                        doc.addImage(delivery.firmaPreposto, 'PNG', 160, y - 6, 20, 12);
-                    } catch (error) {
-                        doc.text('Firmato', 160, y);
-                    }
-                } else {
-                    doc.text('-', 160, y);
-                }
-                
-                if (delivery.firmaLavoratore) {
-                    try {
-                        doc.addImage(delivery.firmaLavoratore, 'PNG', 185, y - 6, 20, 12);
-                    } catch (error) {
-                        doc.text('Firmato', 185, y);
-                    }
-                } else {
-                    doc.text('-', 185, y);
-                }
-                
-                y += 12;
-            });
-            
-            // Footer
-            const pageCount = doc.internal.getNumberOfPages();
-            for (let i = 1; i <= pageCount; i++) {
-                doc.setPage(i);
-                doc.setFontSize(8);
-                doc.text(`Pagina ${i} di ${pageCount}`, 170, 290);
-            }
-        }
-
-        function generateWorkersPDF(doc, title, companyName) {
-            const selectedDept = document.getElementById('select-reparto').value;
-            const settings = JSON.parse(localStorage.getItem('appSettings')) || {};
-            
-            // Header con logo a sinistra e nome azienda a destra
-            if (settings.logo && settings.useLogoOnPrint) {
-                try {
-                    doc.addImage(settings.logo, 'JPEG', 20, 10, 30, 20);
-                } catch (error) {
-                    console.warn('Errore nel caricamento del logo:', error);
-                }
-            }
-            
-            // Nome azienda a destra
-            doc.setFontSize(20);
-            const pageWidth = doc.internal.pageSize.getWidth();
-            const companyNameWidth = doc.getTextWidth(companyName);
-            doc.text(companyName, pageWidth - companyNameWidth - 20, 20);
-            
-            // Titolo centrato
-            doc.setFontSize(16);
-            const titleWidth = doc.getTextWidth(title);
-            doc.text(title, (pageWidth - titleWidth) / 2, 35);
-            
-            // Data di generazione
-            doc.setFontSize(10);
-            doc.text(`Generato il: ${new Date().toLocaleDateString('it-IT')}`, 20, 45);
-            
-            let y = 55;
-            if (selectedDept && selectedDept !== 'tutti') {
-                doc.text(`Reparto: ${selectedDept}`, 20, y);
-                y += 10;
-            }
-            
-            // Ottieni i dati dei lavoratori
-            const workers = JSON.parse(localStorage.getItem('lavoratori')) || [];
-            let filteredWorkers = workers;
-            
-            if (selectedDept && selectedDept !== 'tutti') {
-                filteredWorkers = workers.filter(w => w.reparto === selectedDept);
-            }
-            
-            if (filteredWorkers.length === 0) {
-                doc.text('Nessun lavoratore trovato per i criteri selezionati.', 20, y + 20);
-                return;
-            }
-            
-            // Tabella dei lavoratori
-            y += 20;
-            
-            // Header della tabella
-            doc.setFontSize(8);
-            doc.setFont(undefined, 'bold');
-            doc.text('Nome', 20, y);
-            doc.text('Cognome', 60, y);
-            doc.text('Matricola', 100, y);
-            doc.text('Reparto', 130, y);
-            doc.text('Mansione', 160, y);
-            
-            // Linea sotto l'header
-            doc.line(20, y + 2, 200, y + 2);
-            
-            y += 10;
-            doc.setFont(undefined, 'normal');
-            
-            filteredWorkers.forEach((worker, index) => {
-                if (y > 270) { // Nuova pagina se necessario
-                    doc.addPage();
-                    y = 20;
-                }
-                
-                doc.text(worker.nome.substring(0, 15), 20, y);
-                doc.text(worker.cognome.substring(0, 15), 60, y);
-                doc.text(worker.matricola, 100, y);
-                doc.text((worker.reparto || '-').substring(0, 12), 130, y);
-                doc.text((worker.mansione || '-').substring(0, 15), 160, y);
-                
-                y += 8;
-            });
-            
-            // Footer
-            const pageCount = doc.internal.getNumberOfPages();
-            for (let i = 1; i <= pageCount; i++) {
-                doc.setPage(i);
-                doc.setFontSize(8);
-                doc.text(`Pagina ${i} di ${pageCount}`, 170, 290);
-            }
-        }
-
-        function generateDPIPDF(doc, title, companyName) {
-            const settings = JSON.parse(localStorage.getItem('appSettings')) || {};
-            
-            // Header con logo a sinistra e nome azienda a destra
-            if (settings.logo && settings.useLogoOnPrint) {
-                try {
-                    doc.addImage(settings.logo, 'JPEG', 20, 10, 30, 20);
-                } catch (error) {
-                    console.warn('Errore nel caricamento del logo:', error);
-                }
-            }
-            
-            // Nome azienda a destra
-            doc.setFontSize(20);
-            const pageWidth = doc.internal.pageSize.getWidth();
-            const companyNameWidth = doc.getTextWidth(companyName);
-            doc.text(companyName, pageWidth - companyNameWidth - 20, 20);
-            
-            // Titolo centrato
-            doc.setFontSize(16);
-            const titleWidth = doc.getTextWidth(title);
-            doc.text(title, (pageWidth - titleWidth) / 2, 35);
-            
-            // Data di generazione
-            doc.setFontSize(10);
-            doc.text(`Generato il: ${new Date().toLocaleDateString('it-IT')}`, 20, 45);
-            
-            // Ottieni i dati dei DPI
-            const dpiList = JSON.parse(localStorage.getItem('dpi')) || [];
-            
-            if (dpiList.length === 0) {
-                doc.text('Nessun DPI presente nel sistema.', 20, 65);
-                return;
-            }
-            
-            // Tabella dei DPI
-            let y = 65;
-            
-            // Header della tabella
-            doc.setFontSize(8);
-            doc.setFont(undefined, 'bold');
-            doc.text('Nome DPI', 20, y);
-            doc.text('Codice SAP', 80, y);
-            doc.text('Categoria', 120, y);
-            doc.text('Scadenza', 150, y);
-            doc.text('Note', 170, y);
-            
-            // Linea sotto l'header
-            doc.line(20, y + 2, 200, y + 2);
-            
-            y += 10;
-            doc.setFont(undefined, 'normal');
-            
-            dpiList.forEach((dpi, index) => {
-                if (y > 270) { // Nuova pagina se necessario
-                    doc.addPage();
-                    y = 20;
-                }
-                
-                doc.text(dpi.nome.substring(0, 25), 20, y);
-                doc.text(dpi.sap, 80, y);
-                doc.text(dpi.categoria.substring(0, 12), 120, y);
-                doc.text(dpi.scadenza ? `${dpi.scadenza} mesi` : '-', 150, y);
-                doc.text((dpi.note || '-').substring(0, 15), 170, y);
-                
-                y += 8;
-            });
-            
-            // Footer
-            const pageCount = doc.internal.getNumberOfPages();
-            for (let i = 1; i <= pageCount; i++) {
-                doc.setPage(i);
-                doc.setFontSize(8);
-                doc.text(`Pagina ${i} di ${pageCount}`, 170, 290);
-            }
-        }
-
-        function closePdfPreview() {
-            document.getElementById('pdf-preview-modal').style.display = 'none';
-        }
-
-        function confermaStampa() {
-            if (currentPdfDoc && currentPdfName) {
-                currentPdfDoc.save(currentPdfName);
-                alert('PDF salvato con successo!');
-                closePdfPreview();
-            } else {
-                alert('Errore: nessun PDF da salvare.');
-            }
-        }
-
-        // Nuove funzioni per la ricerca lavoratori
-        function filterWorkers(searchInputId, selectId) {
-            const searchTerm = document.getElementById(searchInputId).value.toLowerCase();
-            const workers = JSON.parse(localStorage.getItem('lavoratori')) || [];
-            const dropdown = document.getElementById(searchInputId === 'search-lavoratore' ? 'worker-dropdown' : 'worker-dropdown-stampa');
-            
-            dropdown.innerHTML = '';
-            
-            if (!searchTerm) {
-                dropdown.style.display = 'none';
-                return;
-            }
-            
-            const filteredWorkers = workers.filter(worker => 
-                worker.nome.toLowerCase().includes(searchTerm) ||
-                worker.cognome.toLowerCase().includes(searchTerm) ||
-                worker.matricola.toLowerCase().includes(searchTerm)
-            );
-            
-            if (filteredWorkers.length === 0) {
-                dropdown.style.display = 'none';
-                return;
-            }
-            
-            filteredWorkers.forEach(worker => {
-                const item = document.createElement('div');
-                item.className = 'worker-dropdown-item';
-                item.textContent = `${worker.cognome} ${worker.nome} (${worker.matricola})`;
-                item.onclick = function() {
-                    document.getElementById(searchInputId).value = `${worker.cognome} ${worker.nome} (${worker.matricola})`;
-                    document.getElementById(selectId).value = worker.matricola;
-                    dropdown.style.display = 'none';
-                    
-                    if (selectId === 'select-lavoratore') {
-                        loadWorkerDeliveries();
-                    } else if (selectId === 'select-lavoratore-stampa') {
-                        updateDeliveryPreview();
-                    }
-                };
-                dropdown.appendChild(item);
-            });
-            
-            dropdown.style.display = 'block';
-        }
-
-        function selectWorkerFromDropdown(searchInputId, selectId) {
-            const select = document.getElementById(selectId);
-            const searchInput = document.getElementById(searchInputId);
-            const dropdown = document.getElementById(searchInputId === 'search-lavoratore' ? 'worker-dropdown' : 'worker-dropdown-stampa');
-            
-            const selectedOption = select.options[select.selectedIndex];
-            if (selectedOption.value) {
-                searchInput.value = selectedOption.text;
-                dropdown.style.display = 'none';
-                
-                if (selectId === 'select-lavoratore') {
-                    loadWorkerDeliveries();
-                } else if (selectId === 'select-lavoratore-stampa') {
-                    updateDeliveryPreview();
-                }
-            }
-        }
-
-        // Chiudi il dropdown quando si clicca fuori
+        // Hide dropdowns when clicking outside
         document.addEventListener('click', function(e) {
-            if (!e.target.closest('.search-worker-container')) {
-                document.querySelectorAll('.worker-dropdown').forEach(dropdown => {
+            const dropdowns = document.querySelectorAll('.worker-dropdown');
+            dropdowns.forEach(dropdown => {
+                if (!dropdown.contains(e.target) && !e.target.classList.contains('search-worker-input')) {
                     dropdown.style.display = 'none';
-                });
-            }
+                }
+            });
         });
 
-        // Funzione per pulire l'anteprima delle consegne
-        function clearDeliveryPreview() {
-            const previewContent = document.getElementById('delivery-preview-content');
-            previewContent.innerHTML = '<tr><td colspan="9">Seleziona un lavoratore o clicca "Mostra tutte le consegne" per visualizzare le consegne.</td></tr>';
-            
-            // Pulisci i campi di ricerca e data
-            document.getElementById('search-lavoratore-stampa').value = '';
-            document.getElementById('select-lavoratore-stampa').value = '';
-            document.getElementById('data-inizio').value = '';
-            document.getElementById('data-fine').value = '';
-            document.getElementById('select-reparto').value = 'tutti'; // Resetta il reparto a "Tutti"
-            
-            // Deseleziona il checkbox "Seleziona tutto"
-            document.getElementById('select-all').checked = false;
-        }
-
-        // Inizializzazione dell'applicazione
+        // Application initialization
         document.addEventListener('DOMContentLoaded', function() {
-            // Inizializza il tema
+            // Initialize theme
             initTheme();
             
-            // Animazione dei pulsanti di navigazione
+            // Navigation button animation
             setTimeout(() => {
                 const buttons = document.querySelectorAll('.nav-button');
                 buttons.forEach((button, index) => {
