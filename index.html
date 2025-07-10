@@ -2825,39 +2825,93 @@
                     const lines = csv.split('\n');
                     let imported = 0;
                     let errors = 0;
+                    let errorDetails = [];
                     
                     statusDiv.innerHTML = '<p>Importazione in corso...</p>';
+                    
+                    // Valid categories
+                    const validCategories = ['Testa', 'Occhi', 'Udito', 'Vie Respiratorie', 'Mani', 'Corpo', 'Piedi', 'Anticaduta', 'Altro'];
                     
                     for (let i = 1; i < lines.length; i++) { // Skip header
                         const line = lines[i].trim();
                         if (!line) continue;
                         
-                        const [nome, codice_sap, categoria, scadenza_mesi, note] = line.split(',').map(s => s.trim());
+                        // Better CSV parsing - handle quoted fields
+                        const fields = parseCSVLine(line);
                         
-                        if (!nome || !codice_sap || !categoria) {
+                        if (fields.length < 3) {
                             errors++;
+                            errorDetails.push(`Riga ${i + 1}: Numero di campi insufficiente (${fields.length}/3 minimi)`);
+                            continue;
+                        }
+                        
+                        const [nome, codice_sap, categoria, scadenza_mesi, note] = fields.map(s => s ? s.trim() : '');
+                        
+                        // Detailed validation
+                        if (!nome) {
+                            errors++;
+                            errorDetails.push(`Riga ${i + 1}: Nome DPI mancante`);
+                            continue;
+                        }
+                        
+                        if (!codice_sap) {
+                            errors++;
+                            errorDetails.push(`Riga ${i + 1}: Codice SAP mancante`);
+                            continue;
+                        }
+                        
+                        if (!categoria) {
+                            errors++;
+                            errorDetails.push(`Riga ${i + 1}: Categoria mancante`);
+                            continue;
+                        }
+                        
+                        // Check if category is valid (case insensitive)
+                        const categoriaMatch = validCategories.find(cat => cat.toLowerCase() === categoria.toLowerCase());
+                        if (!categoriaMatch) {
+                            errors++;
+                            errorDetails.push(`Riga ${i + 1}: Categoria "${categoria}" non valida. Categorie valide: ${validCategories.join(', ')}`);
                             continue;
                         }
                         
                         // Check if SAP code already exists
                         if (dpiData.some(d => d.sap === codice_sap)) {
                             errors++;
+                            errorDetails.push(`Riga ${i + 1}: Codice SAP "${codice_sap}" già esistente`);
                             continue;
                         }
                         
                         const newDPI = { 
-                            nome, 
-                            sap: codice_sap, 
-                            categoria, 
-                            scadenza: scadenza_mesi ? parseInt(scadenza_mesi) : null, 
+                            nome: nome.trim(), 
+                            sap: codice_sap.trim(), 
+                            categoria: categoriaMatch, // Use the matched category with correct case
+                            scadenza: scadenza_mesi && !isNaN(parseInt(scadenza_mesi)) ? parseInt(scadenza_mesi) : null, 
                             note: note || '' 
                         };
                         
-                        await pushToFirebase('dpi', newDPI);
-                        imported++;
+                        try {
+                            await pushToFirebase('dpi', newDPI);
+                            imported++;
+                        } catch (firebaseError) {
+                            errors++;
+                            errorDetails.push(`Riga ${i + 1}: Errore Firebase - ${firebaseError.message}`);
+                        }
                     }
                     
-                    statusDiv.innerHTML = `<p style="color: green;">✅ Importazione completata: ${imported} DPI importati, ${errors} errori</p>`;
+                    // Show detailed results
+                    let resultHtml = `<p style="color: ${imported > 0 ? 'green' : 'orange'};">✅ Importazione completata: ${imported} DPI importati, ${errors} errori</p>`;
+                    
+                    if (errorDetails.length > 0 && errorDetails.length <= 10) {
+                        resultHtml += '<details><summary>Dettagli errori:</summary><ul>';
+                        errorDetails.forEach(error => {
+                            resultHtml += `<li style="font-size: 12px; color: red;">${error}</li>`;
+                        });
+                        resultHtml += '</ul></details>';
+                    } else if (errorDetails.length > 10) {
+                        resultHtml += `<p style="font-size: 12px; color: orange;">Troppi errori per mostrare i dettagli (${errorDetails.length} errori totali)</p>`;
+                    }
+                    
+                    statusDiv.innerHTML = resultHtml;
                     fileInput.value = ''; // Clear file input
                     
                 } catch (error) {
@@ -2871,6 +2925,29 @@
 
         function deleteSelectedDeliveries() {
             alert('Funzione di cancellazione consegne selezionate non ancora implementata');
+        }
+        
+        // Helper function to parse CSV lines properly
+        function parseCSVLine(line) {
+            const result = [];
+            let current = '';
+            let inQuotes = false;
+            
+            for (let i = 0; i < line.length; i++) {
+                const char = line[i];
+                
+                if (char === '"') {
+                    inQuotes = !inQuotes;
+                } else if (char === ',' && !inQuotes) {
+                    result.push(current);
+                    current = '';
+                } else {
+                    current += char;
+                }
+            }
+            
+            result.push(current);
+            return result;
         }
 
         // Hide dropdowns when clicking outside
