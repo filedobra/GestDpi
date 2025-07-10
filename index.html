@@ -2745,12 +2745,128 @@
             }
         }
 
-        function importWorkersCSV() {
-            alert('Funzione di importazione CSV lavoratori non ancora implementata');
+        async function importWorkersCSV() {
+            const fileInput = document.getElementById('csv-workers');
+            const statusDiv = document.getElementById('csv-import-status');
+            
+            if (!fileInput.files[0]) {
+                alert('Seleziona un file CSV prima di importare');
+                return;
+            }
+            
+            const file = fileInput.files[0];
+            const reader = new FileReader();
+            
+            reader.onload = async function(e) {
+                try {
+                    const csv = e.target.result;
+                    const lines = csv.split('\n');
+                    let imported = 0;
+                    let errors = 0;
+                    
+                    statusDiv.innerHTML = '<p>Importazione in corso...</p>';
+                    
+                    for (let i = 1; i < lines.length; i++) { // Skip header
+                        const line = lines[i].trim();
+                        if (!line) continue;
+                        
+                        const [nome, cognome, matricola, reparto, mansione] = line.split(',').map(s => s.trim());
+                        
+                        if (!nome || !cognome || !matricola) {
+                            errors++;
+                            continue;
+                        }
+                        
+                        // Check if matricola already exists
+                        if (workersData.some(w => w.matricola === matricola)) {
+                            errors++;
+                            continue;
+                        }
+                        
+                        const newWorker = { 
+                            nome, 
+                            cognome, 
+                            matricola, 
+                            reparto: reparto || '', 
+                            mansione: mansione || '' 
+                        };
+                        
+                        await pushToFirebase('lavoratori', newWorker);
+                        imported++;
+                    }
+                    
+                    statusDiv.innerHTML = `<p style="color: green;">✅ Importazione completata: ${imported} lavoratori importati, ${errors} errori</p>`;
+                    fileInput.value = ''; // Clear file input
+                    
+                } catch (error) {
+                    console.error('Error importing CSV:', error);
+                    statusDiv.innerHTML = '<p style="color: red;">❌ Errore durante l\'importazione del CSV</p>';
+                }
+            };
+            
+            reader.readAsText(file);
         }
 
-        function importDPICSV() {
-            alert('Funzione di importazione CSV DPI non ancora implementata');
+        async function importDPICSV() {
+            const fileInput = document.getElementById('csv-dpi');
+            const statusDiv = document.getElementById('csv-dpi-import-status');
+            
+            if (!fileInput.files[0]) {
+                alert('Seleziona un file CSV prima di importare');
+                return;
+            }
+            
+            const file = fileInput.files[0];
+            const reader = new FileReader();
+            
+            reader.onload = async function(e) {
+                try {
+                    const csv = e.target.result;
+                    const lines = csv.split('\n');
+                    let imported = 0;
+                    let errors = 0;
+                    
+                    statusDiv.innerHTML = '<p>Importazione in corso...</p>';
+                    
+                    for (let i = 1; i < lines.length; i++) { // Skip header
+                        const line = lines[i].trim();
+                        if (!line) continue;
+                        
+                        const [nome, codice_sap, categoria, scadenza_mesi, note] = line.split(',').map(s => s.trim());
+                        
+                        if (!nome || !codice_sap || !categoria) {
+                            errors++;
+                            continue;
+                        }
+                        
+                        // Check if SAP code already exists
+                        if (dpiData.some(d => d.sap === codice_sap)) {
+                            errors++;
+                            continue;
+                        }
+                        
+                        const newDPI = { 
+                            nome, 
+                            sap: codice_sap, 
+                            categoria, 
+                            scadenza: scadenza_mesi ? parseInt(scadenza_mesi) : null, 
+                            note: note || '' 
+                        };
+                        
+                        await pushToFirebase('dpi', newDPI);
+                        imported++;
+                    }
+                    
+                    statusDiv.innerHTML = `<p style="color: green;">✅ Importazione completata: ${imported} DPI importati, ${errors} errori</p>`;
+                    fileInput.value = ''; // Clear file input
+                    
+                } catch (error) {
+                    console.error('Error importing DPI CSV:', error);
+                    statusDiv.innerHTML = '<p style="color: red;">❌ Errore durante l\'importazione del CSV</p>';
+                }
+            };
+            
+            reader.readAsText(file);
         }
 
         function deleteSelectedDeliveries() {
