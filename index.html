@@ -510,6 +510,53 @@
             height: 20px;
         }
 
+        .csv-import-section {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 30px;
+            border: 2px dashed #dee2e6;
+        }
+
+        .csv-import-section h3 {
+            color: #495057;
+            margin-bottom: 15px;
+        }
+
+        .csv-format-info {
+            background: #e9ecef;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+            font-size: 0.9em;
+        }
+
+        .csv-format-info h4 {
+            margin-bottom: 10px;
+            color: #495057;
+        }
+
+        .csv-format-info code {
+            background: #f8f9fa;
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-family: monospace;
+        }
+
+        .import-progress {
+            display: none;
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+
+        .import-progress.show {
+            display: block;
+        }
+
         @media (max-width: 768px) {
             .nav-grid {
                 grid-template-columns: 1fr;
@@ -731,13 +778,30 @@
                 </table>
             </div>
             
-            <div style="margin-top: 30px;">
+            <div class="csv-import-section">
                 <h3>📁 Importa Lavoratori da CSV</h3>
+                
+                <div class="csv-format-info">
+                    <h4>📋 Formato richiesto:</h4>
+                    <p>Il file CSV deve contenere le seguenti colonne nell'ordine specificato:</p>
+                    <p><code>nome,cognome,matricola,reparto,mansione</code></p>
+                    <p><strong>Esempio:</strong></p>
+                    <p><code>Mario,Rossi,12345,Produzione,Operaio</code></p>
+                    <p><code>Giulia,Bianchi,67890,Ufficio,Impiegata</code></p>
+                    <p><em>Nota: I campi nome, cognome e matricola sono obbligatori. Reparto e mansione sono opzionali.</em></p>
+                </div>
+                
                 <div class="form-group">
-                    <label for="csv-workers">Seleziona file CSV (nome,cognome,matricola,reparto,mansione):</label>
+                    <label for="csv-workers">Seleziona file CSV:</label>
                     <input type="file" id="csv-workers" accept=".csv">
                 </div>
+                
                 <button class="btn" onclick="importWorkersCSV()">📥 Importa CSV</button>
+                
+                <div id="import-progress-workers" class="import-progress">
+                    <p>⏳ Importazione in corso...</p>
+                </div>
+                
                 <div id="csv-import-status" style="margin-top: 10px;"></div>
             </div>
         </div>
@@ -810,13 +874,31 @@
                 </table>
             </div>
             
-            <div style="margin-top: 30px;">
+            <div class="csv-import-section">
                 <h3>📁 Importa DPI da CSV</h3>
+                
+                <div class="csv-format-info">
+                    <h4>📋 Formato richiesto:</h4>
+                    <p>Il file CSV deve contenere le seguenti colonne nell'ordine specificato:</p>
+                    <p><code>nome,codice_sap,categoria,scadenza_mesi,note</code></p>
+                    <p><strong>Categorie valide:</strong> Testa, Occhi, Udito, Vie Respiratorie, Mani, Corpo, Piedi, Anticaduta, Altro</p>
+                    <p><strong>Esempio:</strong></p>
+                    <p><code>Casco di sicurezza,SAP001,Testa,36,Casco bianco</code></p>
+                    <p><code>Guanti in lattice,SAP002,Mani,12,Monouso</code></p>
+                    <p><em>Nota: I campi nome, codice_sap e categoria sono obbligatori. Scadenza_mesi e note sono opzionali.</em></p>
+                </div>
+                
                 <div class="form-group">
-                    <label for="csv-dpi">Seleziona file CSV (nome,codice_sap,categoria,scadenza_mesi,note):</label>
+                    <label for="csv-dpi">Seleziona file CSV:</label>
                     <input type="file" id="csv-dpi" accept=".csv">
                 </div>
+                
                 <button class="btn" onclick="importDPICSV()">📥 Importa CSV</button>
+                
+                <div id="import-progress-dpi" class="import-progress">
+                    <p>⏳ Importazione in corso...</p>
+                </div>
+                
                 <div id="csv-dpi-import-status" style="margin-top: 10px;"></div>
             </div>
         </div>
@@ -2745,9 +2827,11 @@
             }
         }
 
+        // Improved CSV import functions with better error handling and progress indication
         async function importWorkersCSV() {
             const fileInput = document.getElementById('csv-workers');
             const statusDiv = document.getElementById('csv-import-status');
+            const progressDiv = document.getElementById('import-progress-workers');
             
             if (!fileInput.files[0]) {
                 alert('Seleziona un file CSV prima di importare');
@@ -2759,47 +2843,97 @@
             
             reader.onload = async function(e) {
                 try {
+                    // Show progress
+                    progressDiv.classList.add('show');
+                    statusDiv.innerHTML = '';
+                    
                     const csv = e.target.result;
                     const lines = csv.split('\n');
                     let imported = 0;
                     let errors = 0;
+                    let errorDetails = [];
                     
-                    statusDiv.innerHTML = '<p>Importazione in corso...</p>';
-                    
-                    for (let i = 1; i < lines.length; i++) { // Skip header
+                    // Skip header and process each line
+                    for (let i = 1; i < lines.length; i++) {
                         const line = lines[i].trim();
                         if (!line) continue;
                         
-                        const [nome, cognome, matricola, reparto, mansione] = line.split(',').map(s => s.trim());
+                        // Better CSV parsing - handle quoted fields
+                        const fields = parseCSVLine(line);
                         
-                        if (!nome || !cognome || !matricola) {
+                        if (fields.length < 3) {
                             errors++;
+                            errorDetails.push(`Riga ${i + 1}: Numero di campi insufficiente (${fields.length}/3 minimi)`);
+                            continue;
+                        }
+                        
+                        const [nome, cognome, matricola, reparto, mansione] = fields.map(s => s ? s.trim() : '');
+                        
+                        // Detailed validation
+                        if (!nome) {
+                            errors++;
+                            errorDetails.push(`Riga ${i + 1}: Nome mancante`);
+                            continue;
+                        }
+                        
+                        if (!cognome) {
+                            errors++;
+                            errorDetails.push(`Riga ${i + 1}: Cognome mancante`);
+                            continue;
+                        }
+                        
+                        if (!matricola) {
+                            errors++;
+                            errorDetails.push(`Riga ${i + 1}: Matricola mancante`);
                             continue;
                         }
                         
                         // Check if matricola already exists
                         if (workersData.some(w => w.matricola === matricola)) {
                             errors++;
+                            errorDetails.push(`Riga ${i + 1}: Matricola "${matricola}" già esistente`);
                             continue;
                         }
                         
                         const newWorker = { 
-                            nome, 
-                            cognome, 
-                            matricola, 
+                            nome: nome.trim(), 
+                            cognome: cognome.trim(), 
+                            matricola: matricola.trim(), 
                             reparto: reparto || '', 
                             mansione: mansione || '' 
                         };
                         
-                        await pushToFirebase('lavoratori', newWorker);
-                        imported++;
+                        try {
+                            await pushToFirebase('lavoratori', newWorker);
+                            imported++;
+                        } catch (firebaseError) {
+                            errors++;
+                            errorDetails.push(`Riga ${i + 1}: Errore Firebase - ${firebaseError.message}`);
+                        }
                     }
                     
-                    statusDiv.innerHTML = `<p style="color: green;">✅ Importazione completata: ${imported} lavoratori importati, ${errors} errori</p>`;
+                    // Hide progress
+                    progressDiv.classList.remove('show');
+                    
+                    // Show detailed results
+                    let resultHtml = `<p style="color: ${imported > 0 ? 'green' : 'orange'};">✅ Importazione completata: ${imported} lavoratori importati, ${errors} errori</p>`;
+                    
+                    if (errorDetails.length > 0 && errorDetails.length <= 10) {
+                        resultHtml += '<details><summary>Dettagli errori:</summary><ul>';
+                        errorDetails.forEach(error => {
+                            resultHtml += `<li style="font-size: 12px; color: red;">${error}</li>`;
+                        });
+                        resultHtml += '</ul></details>';
+                    } else if (errorDetails.length > 10) {
+                        resultHtml += `<p style="font-size: 12px; color: orange;">Troppi errori per mostrare i dettagli (${errorDetails.length} errori totali)</p>`;
+                    }
+                    
+                    statusDiv.innerHTML = resultHtml;
                     fileInput.value = ''; // Clear file input
                     
                 } catch (error) {
                     console.error('Error importing CSV:', error);
+                    progressDiv.classList.remove('show');
                     statusDiv.innerHTML = '<p style="color: red;">❌ Errore durante l\'importazione del CSV</p>';
                 }
             };
@@ -2810,6 +2944,7 @@
         async function importDPICSV() {
             const fileInput = document.getElementById('csv-dpi');
             const statusDiv = document.getElementById('csv-dpi-import-status');
+            const progressDiv = document.getElementById('import-progress-dpi');
             
             if (!fileInput.files[0]) {
                 alert('Seleziona un file CSV prima di importare');
@@ -2821,18 +2956,21 @@
             
             reader.onload = async function(e) {
                 try {
+                    // Show progress
+                    progressDiv.classList.add('show');
+                    statusDiv.innerHTML = '';
+                    
                     const csv = e.target.result;
                     const lines = csv.split('\n');
                     let imported = 0;
                     let errors = 0;
                     let errorDetails = [];
                     
-                    statusDiv.innerHTML = '<p>Importazione in corso...</p>';
-                    
                     // Valid categories
                     const validCategories = ['Testa', 'Occhi', 'Udito', 'Vie Respiratorie', 'Mani', 'Corpo', 'Piedi', 'Anticaduta', 'Altro'];
                     
-                    for (let i = 1; i < lines.length; i++) { // Skip header
+                    // Skip header and process each line
+                    for (let i = 1; i < lines.length; i++) {
                         const line = lines[i].trim();
                         if (!line) continue;
                         
@@ -2898,6 +3036,9 @@
                         }
                     }
                     
+                    // Hide progress
+                    progressDiv.classList.remove('show');
+                    
                     // Show detailed results
                     let resultHtml = `<p style="color: ${imported > 0 ? 'green' : 'orange'};">✅ Importazione completata: ${imported} DPI importati, ${errors} errori</p>`;
                     
@@ -2916,6 +3057,7 @@
                     
                 } catch (error) {
                     console.error('Error importing DPI CSV:', error);
+                    progressDiv.classList.remove('show');
                     statusDiv.innerHTML = '<p style="color: red;">❌ Errore durante l\'importazione del CSV</p>';
                 }
             };
