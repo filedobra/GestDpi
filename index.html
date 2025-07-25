@@ -2519,14 +2519,58 @@
                 currentPdfDoc = doc;
                 let finalFilename = filename;
                 
-                // Se è una stampa di consegne e c'è un lavoratore selezionato, aggiungi il cognome
+                // Se è una stampa di consegne, determina il nome del lavoratore
                 if (type === 'consegne') {
                     const selectedWorkerId = document.getElementById('select-lavoratore-stampa').value;
+                    const workers = JSON.parse(localStorage.getItem('lavoratori')) || [];
+                    
                     if (selectedWorkerId) {
-                        const workers = JSON.parse(localStorage.getItem('lavoratori')) || [];
+                        // Caso 1: Lavoratore selezionato dal dropdown
                         const selectedWorker = workers.find(w => w.matricola === selectedWorkerId);
                         if (selectedWorker) {
-                            finalFilename = `${filename}_${selectedWorker.cognome}`;
+                            finalFilename = `${filename}_${selectedWorker.cognome}_${selectedWorker.nome}`;
+                        }
+                    } else {
+                        // Caso 2: Nessun lavoratore selezionato, controlla le consegne selezionate
+                        const selectedDeliveries = getSelectedDeliveries();
+                        if (selectedDeliveries.length > 0) {
+                            // Verifica se tutte le consegne selezionate sono dello stesso lavoratore
+                            const firstDelivery = selectedDeliveries[0];
+                            let workerName = '';
+                            
+                            // Estrai il nome del lavoratore dalla prima consegna
+                            if (firstDelivery.workerData) {
+                                workerName = `${firstDelivery.workerData.cognome}_${firstDelivery.workerData.nome}`;
+                            } else if (firstDelivery.lavoratore) {
+                                const worker = workers.find(w => w.matricola === firstDelivery.lavoratore);
+                                if (worker) {
+                                    workerName = `${worker.cognome}_${worker.nome}`;
+                                }
+                            }
+                            
+                            // Verifica se tutte le consegne sono dello stesso lavoratore
+                            const allSameWorker = selectedDeliveries.every(delivery => {
+                                let currentWorkerMatricola = '';
+                                if (delivery.workerData) {
+                                    currentWorkerMatricola = delivery.workerData.matricola;
+                                } else {
+                                    currentWorkerMatricola = delivery.lavoratore;
+                                }
+                                
+                                let firstWorkerMatricola = '';
+                                if (firstDelivery.workerData) {
+                                    firstWorkerMatricola = firstDelivery.workerData.matricola;
+                                } else {
+                                    firstWorkerMatricola = firstDelivery.lavoratore;
+                                }
+                                
+                                return currentWorkerMatricola === firstWorkerMatricola;
+                            });
+                            
+                            // Se tutte le consegne sono dello stesso lavoratore, usa il suo nome
+                            if (allSameWorker && workerName) {
+                                finalFilename = `${filename}_${workerName}`;
+                            }
                         }
                     }
                 }
