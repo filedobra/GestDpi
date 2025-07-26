@@ -130,11 +130,44 @@ Per problemi o domande:
 - 📖 Consulta la documentazione integrata
 - 🔧 Verifica la compatibilità del browser
 
-## 📄 Licenza
+## 🔐 Modalità PIN
 
-Questo progetto è distribuito sotto licenza MIT. Vedi il file LICENSE per maggiori dettagli.
+- All'avvio l'app è in sola lettura.
+- Per attivare la scrittura:
+  1. Tocca `🔓 Sblocca Scrittura`
+  2. Inserisci il PIN corretto (`1234` di default)
+  3. Tutte le azioni (inserimento, modifica, cancellazione, esportazione) diventano disponibili.
 
 ---
 
-**Nota**: Questa applicazione è progettata per uso aziendale interno. Assicurati di rispettare le normative sulla sicurezza sul lavoro vigenti nella tua giurisdizione.
+## 🧪 Utilizzo in locale
 
+Puoi aprire il file `GestDpi.html` direttamente in un browser **senza connessione Internet**.
+
+---
+
+## 📦 Versione Android (APK)
+
+L'app può essere trasformata in un'app Android tramite WebView e Android Studio. Contattaci per il file `.apk` o istruzioni di compilazione.
+
+---
+
+## 📁 Struttura del progetto
+
+- `GestDpi_PIN_avviso_CORRETTO.html` – file principale dell’app
+- `README.md` – questo file
+- `assets/` (opzionale) – cartelle aggiuntive per stili, script, icone
+
+---
+
+## 📣 Contatti
+
+Per supporto, personalizzazioni o contributi:
+📧 email: [tua-email@esempio.com]  
+📂 progetto: [GitHub Repo Link]
+
+---
+
+## ⚠️ Licenza
+
+Questo progetto è rilasciato con licenza **MIT**. Puoi usarlo, modificarlo e distribuirlo liberamente, a patto di mantenere i riferimenti originali.
