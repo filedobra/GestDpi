@@ -2926,12 +2926,10 @@
             }, 500);
         });
     </script>
-
 <div style="margin-top: 1em; text-align: center;">
 <button onclick="sbloccaScrittura()" style="background-color: #28a745; color: white; padding: 10px 20px; font-size: 16px; border-radius: 8px; margin-right: 10px;">🔓 Sblocca Scrittura</button>
 <button onclick="cambiaPIN()" style="background-color: #ffc107; color: black; padding: 10px 20px; font-size: 16px; border-radius: 8px;">🔑 Cambia PIN</button>
 </div>
-
 <script>
 let pinScrittura = localStorage.getItem('pinScrittura') || '1234';
 window.scritturaAbilitata = false;
@@ -2959,6 +2957,63 @@ function cambiaPIN() {
     alert("⚠️ PIN non valido.");
   }
 }
+</script>
+<script>
+// Funzioni principali con controllo sblocco scrittura
+function checkScrittura() {
+  if (!window.scritturaAbilitata) {
+    alert("❗ Per modificare o inserire dati, devi prima sbloccare la scrittura con il PIN.");
+    return false;
+  }
+  return true;
+}
+
+// Esempi di funzioni protette (puoi sostituire con le reali già presenti nel tuo file)
+function aggiungiLavoratore() {
+  if (!checkScrittura()) return;
+  alert("Lavoratore aggiunto (demo).");
+}
+
+function aggiungiDPI() {
+  if (!checkScrittura()) return;
+  alert("DPI aggiunto (demo).");
+}
+
+function consegnaDPI() {
+  if (!checkScrittura()) return;
+  alert("Consegna registrata (demo).");
+}
+
+function importaCSV() {
+  if (!checkScrittura()) return;
+  alert("CSV importato (demo).");
+}
+</script>
+
+<script>
+// Verifica PIN prima di ogni azione sensibile (lettura o scrittura)
+function checkScritturaAvvisando() {
+  if (!window.scritturaAbilitata) {
+    alert("🔒 Devi prima sbloccare la scrittura con il PIN per usare questa funzione.");
+    return false;
+  }
+  return true;
+}
+
+// Avvolgi le funzioni già presenti con il controllo, se non già protette
+const funzioniProtette = ['addWorker', 'editWorker', 'deleteWorker', 'importWorkersCSV', 'loadWorkers',
+                          'addDPI', 'editDPI', 'deleteDPI', 'importDPICSV', 'saveDelivery', 'addToDelivery',
+                          'loadWorkerDeliveries', 'performSearch', 'showAllDeliveriesInSearch'];
+
+funzioniProtette.forEach(nome => {
+  const originale = window[nome];
+  if (typeof originale === 'function') {
+    window[nome] = function(...args) {
+      if (!checkScritturaAvvisando()) return;
+      return originale.apply(this, args);
+    };
+  }
+});
 </script>
 </body>
 </html>
