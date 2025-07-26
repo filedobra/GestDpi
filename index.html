@@ -1,11 +1,12 @@
 <!DOCTYPE html>
+
 <html lang="it">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gestione DPI</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <style>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Gestione DPI</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
         :root {
             --bg-primary: #667eea;
             --bg-secondary: #764ba2;
@@ -457,462 +458,408 @@
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <button class="theme-toggle" onclick="toggleTheme()" title="Cambia tema">🌙</button>
-            <h1>🛡️ Gestione DPI</h1>
-            <p>Sistema di Gestione Dispositivi di Protezione Individuale</p>
-        </div>
-
-        <!-- Home Section -->
-        <div id="home-section" class="section active">
-            <div class="nav-grid">
-                <button class="nav-button consegna" onclick="showSection('consegna-section')">
+<div class="container">
+<div class="header">
+<button class="theme-toggle" onclick="toggleTheme()" title="Cambia tema">🌙</button>
+<h1>🛡️ Gestione DPI</h1>
+<p>Sistema di Gestione Dispositivi di Protezione Individuale</p>
+</div>
+<!-- Home Section -->
+<div class="section active" id="home-section">
+<div class="nav-grid">
+<button class="nav-button consegna" onclick="showSection('consegna-section')">
                     🚚 Consegna DPI
                 </button>
-                <button class="nav-button lavoratori" onclick="showSection('lavoratori-section')">
+<button class="nav-button lavoratori" onclick="showSection('lavoratori-section')">
                     👥 Lavoratori
                 </button>
-                <button class="nav-button dpi" onclick="showSection('dpi-section')">
+<button class="nav-button dpi" onclick="showSection('dpi-section')">
                     🦺 DPI
                 </button>
-                <button class="nav-button cerca" onclick="showSection('cerca-section')">
+<button class="nav-button cerca" onclick="showSection('cerca-section')">
                     🔍 Cerca
                 </button>
-                <button class="nav-button impostazioni" onclick="showSection('impostazioni-section')">
+<button class="nav-button impostazioni" onclick="showSection('impostazioni-section')">
                     ⚙️ Impostazioni
                 </button>
-                <button class="nav-button stampa" onclick="showSection('stampa-section')">
+<button class="nav-button stampa" onclick="showSection('stampa-section')">
                     🖨️ Stampa
                 </button>
-            </div>
-        </div>
-
-        <!-- Consegna Section -->
-        <div id="consegna-section" class="section">
-            <button class="home-btn" onclick="showSection('home-section')">🏠 Home</button>
-            <h2>🚚 Consegna DPI</h2>
-            
-            <div id="error-container"></div>
-            
-            <div class="form-grid">
-                <div class="form-group">
-                    <label for="search-lavoratore">👤 Lavoratore:</label>
-                    <div class="search-worker-container">
-                        <input type="text" id="search-lavoratore" class="search-worker-input" placeholder="Cerca per nome, cognome o matricola" oninput="filterWorkers('search-lavoratore', 'select-lavoratore')">
-                        <select id="select-lavoratore" onchange="selectWorkerFromDropdown('search-lavoratore', 'select-lavoratore')" style="display: none;">
-                            <option value="">Seleziona lavoratore</option>
-                        </select>
-                        <div id="worker-dropdown" class="worker-dropdown"></div>
-                    </div>
-                    <div id="error-lavoratore" class="error-text"></div>
-                </div>
-                
-                <div class="form-group">
-                    <label for="select-dpi">🦺 DPI:</label>
-                    <select id="select-dpi">
-                        <option value="">Seleziona DPI</option>
-                    </select>
-                    <div id="error-dpi" class="error-text"></div>
-                </div>
-            </div>
-            
-            <div class="form-grid">
-                <div class="form-group">
-                    <label for="quantita">🔢 Quantità:</label>
-                    <input type="number" id="quantita" min="1" value="1">
-                    <div id="error-quantita" class="error-text"></div>
-                </div>
-                
-                <div class="form-group">
-                    <label for="data-consegna">📅 Data:</label>
-                    <input type="date" id="data-consegna">
-                    <div id="error-data" class="error-text"></div>
-                </div>
-                
-                <div class="form-group">
-                    <label for="motivo">📝 Motivo:</label>
-                    <select id="motivo">
-                        <option value="primo">Primo Prelievo</option>
-                        <option value="danneggiato">Danneggiato</option>
-                        <option value="scaduto">Scaduto</option>
-                    </select>
-                </div>
-            </div>
-            
-            <div class="form-grid">
-                <div class="signature-container">
-                    <label>✍️ Firma Preposto:</label>
-                    <canvas id="firma-preposto" class="signature-canvas" width="300" height="150"></canvas>
-                    <div class="signature-buttons">
-                        <button class="btn danger" onclick="clearSignature('firma-preposto')">🗑️ Cancella Firma</button>
-                    </div>
-                    <div id="error-firma-preposto" class="error-text"></div>
-                </div>
-                
-                <div class="signature-container">
-                    <label>✍️ Firma Lavoratore:</label>
-                    <canvas id="firma-lavoratore" class="signature-canvas" width="300" height="150"></canvas>
-                    <div class="signature-buttons">
-                        <button class="btn danger" onclick="clearSignature('firma-lavoratore')">🗑️ Cancella Firma</button>
-                    </div>
-                    <div id="error-firma-lavoratore" class="error-text"></div>
-                </div>
-            </div>
-            
-            <div style="text-align: center; margin: 30px 0;">
-                <button class="btn success" onclick="addToDelivery()">➕ Aggiungi alla consegna</button>
-                <button class="btn warning" onclick="saveDelivery()">💾 Salva Consegna</button>
-            </div>
-            
-            <div id="existing-deliveries" style="display: none;">
-                <h3>Consegne precedenti per questo lavoratore:</h3>
-                <div id="worker-deliveries-table"></div>
-            </div>
-            
-            <div class="table-container">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Lavoratore</th>
-                            <th>DPI</th>
-                            <th>Codice SAP</th>
-                            <th>Quantità</th>
-                            <th>Data</th>
-                            <th>Motivo</th>
-                            <th>Firma Preposto</th>
-                            <th>Firma Lavoratore</th>
-                            <th>Azioni</th>
-                        </tr>
-                    </thead>
-                    <tbody id="delivery-table-body">
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-        <!-- Lavoratori Section -->
-        <div id="lavoratori-section" class="section">
-            <button class="home-btn" onclick="showSection('home-section')">🏠 Home</button>
-            <h2>👥 Gestione Lavoratori</h2>
-            
-            <div class="form-grid">
-                <div class="form-group">
-                    <label for="nome">👤 Nome:</label>
-                    <input type="text" id="nome" placeholder="Nome del lavoratore">
-                </div>
-                
-                <div class="form-group">
-                    <label for="cognome">👤 Cognome:</label>
-                    <input type="text" id="cognome" placeholder="Cognome del lavoratore">
-                </div>
-                
-                <div class="form-group">
-                    <label for="matricola">🆔 Matricola:</label>
-                    <input type="text" id="matricola" placeholder="Matricola del lavoratore">
-                </div>
-            </div>
-            
-            <div class="form-grid">
-                <div class="form-group">
-                    <label for="reparto">🏢 Reparto:</label>
-                    <input type="text" id="reparto" placeholder="Reparto (opzionale)">
-                </div>
-                
-                <div class="form-group">
-                    <label for="mansione">💼 Mansione:</label>
-                    <input type="text" id="mansione" placeholder="Mansione (opzionale)">
-                </div>
-            </div>
-            
-            <div style="text-align: center; margin: 30px 0;">
-                <button class="btn success" onclick="addWorker()">➕ Aggiungi Lavoratore</button>
-                <button class="btn warning" onclick="editWorker()">✏️ Modifica Lavoratore</button>
-                <button class="btn danger" onclick="deleteWorker()">🗑️ Cancella Lavoratore</button>
-            </div>
-            
-            <div class="table-container">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Nome</th>
-                            <th>Cognome</th>
-                            <th>Matricola</th>
-                            <th>Reparto</th>
-                            <th>Mansione</th>
-                            <th>Azioni</th>
-                        </tr>
-                    </thead>
-                    <tbody id="workers-table-body">
-                    </tbody>
-                </table>
-            </div>
-            
-            <div style="margin-top: 30px;">
-                <h3>📁 Importa Lavoratori da CSV</h3>
-                <div class="form-group">
-                    <label for="csv-workers">Seleziona file CSV (nome,cognome,matricola,reparto,mansione):</label>
-                    <input type="file" id="csv-workers" accept=".csv">
-                </div>
-                <button class="btn" onclick="importWorkersCSV()">📥 Importa CSV</button>
-                <div id="csv-import-status" style="margin-top: 10px;"></div>
-            </div>
-        </div>
-
-        <!-- DPI Section -->
-        <div id="dpi-section" class="section">
-            <button class="home-btn" onclick="showSection('home-section')">🏠 Home</button>
-            <h2>🦺 Gestione DPI</h2>
-            
-            <div class="form-grid">
-                <div class="form-group">
-                    <label for="nome-dpi">🦺 Nome DPI:</label>
-                    <input type="text" id="nome-dpi" placeholder="Nome del DPI">
-                </div>
-                
-                <div class="form-group">
-                    <label for="codice-sap">🏷️ Codice SAP:</label>
-                    <input type="text" id="codice-sap" placeholder="Codice SAP univoco">
-                </div>
-            </div>
-            
-            <div class="form-grid">
-                <div class="form-group">
-                    <label for="categoria">📂 Categoria:</label>
-                    <select id="categoria">
-                        <option value="">Seleziona categoria</option>
-                        <option value="Testa">Testa</option>
-                        <option value="Occhi">Occhi</option>
-                        <option value="Udito">Udito</option>
-                        <option value="Vie Respiratorie">Vie Respiratorie</option>
-                        <option value="Mani">Mani</option>
-                        <option value="Corpo">Corpo</option>
-                        <option value="Piedi">Piedi</option>
-                        <option value="Anticaduta">Anticaduta</option>
-                        <option value="Altro">Altro</option>
-                    </select>
-                </div>
-                
-                <div class="form-group">
-                    <label for="scadenza">⏰ Scadenza (mesi):</label>
-                    <input type="number" id="scadenza" placeholder="Durata in mesi (opzionale)">
-                </div>
-            </div>
-            
-            <div class="form-group">
-                <label for="note-dpi">📝 Note:</label>
-                <input type="text" id="note-dpi" placeholder="Note aggiuntive (opzionale)">
-            </div>
-            
-            <div style="text-align: center; margin: 30px 0;">
-                <button class="btn success" onclick="addDPI()">➕ Aggiungi DPI</button>
-                <button class="btn warning" onclick="editDPI()">✏️ Modifica DPI</button>
-                <button class="btn danger" onclick="deleteDPI()">🗑️ Cancella DPI</button>
-            </div>
-            
-            <div class="table-container">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Nome</th>
-                            <th>Codice SAP</th>
-                            <th>Categoria</th>
-                            <th>Scadenza (mesi)</th>
-                            <th>Note</th>
-                            <th>Azioni</th>
-                        </tr>
-                    </thead>
-                    <tbody id="dpi-table-body">
-                    </tbody>
-                </table>
-            </div>
-            
-            <div style="margin-top: 30px;">
-                <h3>📁 Importa DPI da CSV</h3>
-                <div class="form-group">
-                    <label for="csv-dpi">Seleziona file CSV (nome,codice_sap,categoria,scadenza_mesi,note):</label>
-                    <input type="file" id="csv-dpi" accept=".csv">
-                </div>
-                <button class="btn" onclick="importDPICSV()">📥 Importa CSV</button>
-                <div id="csv-dpi-import-status" style="margin-top: 10px;"></div>
-            </div>
-        </div>
-
-        <!-- Cerca Section -->
-        <div id="cerca-section" class="section">
-            <button class="home-btn" onclick="showSection('home-section')">🏠 Home</button>
-            <h2>🔍 Cerca</h2>
-            
-            <div class="form-grid">
-                <div class="form-group">
-                    <label for="search-type">Tipo di ricerca:</label>
-                    <select id="search-type" onchange="updateSearchFields()">
-                        <option value="lavoratori">Lavoratori</option>
-                        <option value="dpi">DPI</option>
-                        <option value="consegne">Consegne</option>
-                    </select>
-                </div>
-                
-                <div class="form-group">
-                    <label for="search-term">Termine di ricerca:</label>
-                    <input type="text" id="search-term" placeholder="Inserisci termine di ricerca">
-                </div>
-            </div>
-            
-            <div style="text-align: center; margin: 30px 0;">
-                <button class="btn" onclick="performSearch()">🔍 Cerca</button>
-                <button class="btn" onclick="showAllDeliveriesInSearch()">📋 Mostra tutte le consegne</button>
-                <button class="btn warning" onclick="clearSearch()">🗑️ Pulisci</button>
-            </div>
-            
-            <div id="search-results" class="table-container" style="display: none;">
-                <h3>Risultati della ricerca:</h3>
-                <div id="search-results-content"></div>
-                <div id="search-actions" style="display: none; margin-top: 20px;">
-                    <button class="btn danger" onclick="deleteSelectedDeliveries()">🗑️ Cancella selezionate</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Impostazioni Section -->
-        <div id="impostazioni-section" class="section">
-            <button class="home-btn" onclick="showSection('home-section')">🏠 Home</button>
-            <h2>⚙️ Impostazioni</h2>
-            
-            <div class="form-grid">
-                <div class="form-group">
-                    <label for="company-name">🏢 Nome Azienda:</label>
-                    <input type="text" id="company-name" placeholder="Nome dell'azienda">
-                </div>
-                
-                <div class="form-group">
-                    <label for="company-logo">🖼️ Logo Azienda:</label>
-                    <input type="file" id="company-logo" accept="image/*">
-                </div>
-            </div>
-            
-            <div class="form-grid">
-                <div class="form-group">
-                    <label>
-                        <input type="checkbox" id="use-logo-print"> Usa logo nelle stampe
+</div>
+</div>
+<!-- Consegna Section -->
+<div class="section" id="consegna-section">
+<button class="home-btn" onclick="showSection('home-section')">🏠 Home</button>
+<h2>🚚 Consegna DPI</h2>
+<div id="error-container"></div>
+<div class="form-grid">
+<div class="form-group">
+<label for="search-lavoratore">👤 Lavoratore:</label>
+<div class="search-worker-container">
+<input class="search-worker-input" id="search-lavoratore" oninput="filterWorkers('search-lavoratore', 'select-lavoratore')" placeholder="Cerca per nome, cognome o matricola" type="text"/>
+<select id="select-lavoratore" onchange="selectWorkerFromDropdown('search-lavoratore', 'select-lavoratore')" style="display: none;">
+<option value="">Seleziona lavoratore</option>
+</select>
+<div class="worker-dropdown" id="worker-dropdown"></div>
+</div>
+<div class="error-text" id="error-lavoratore"></div>
+</div>
+<div class="form-group">
+<label for="select-dpi">🦺 DPI:</label>
+<select id="select-dpi">
+<option value="">Seleziona DPI</option>
+</select>
+<div class="error-text" id="error-dpi"></div>
+</div>
+</div>
+<div class="form-grid">
+<div class="form-group">
+<label for="quantita">🔢 Quantità:</label>
+<input id="quantita" min="1" type="number" value="1"/>
+<div class="error-text" id="error-quantita"></div>
+</div>
+<div class="form-group">
+<label for="data-consegna">📅 Data:</label>
+<input id="data-consegna" type="date"/>
+<div class="error-text" id="error-data"></div>
+</div>
+<div class="form-group">
+<label for="motivo">📝 Motivo:</label>
+<select id="motivo">
+<option value="primo">Primo Prelievo</option>
+<option value="danneggiato">Danneggiato</option>
+<option value="scaduto">Scaduto</option>
+</select>
+</div>
+</div>
+<div class="form-grid">
+<div class="signature-container">
+<label>✍️ Firma Preposto:</label>
+<canvas class="signature-canvas" height="150" id="firma-preposto" width="300"></canvas>
+<div class="signature-buttons">
+<button class="btn danger" onclick="clearSignature('firma-preposto')">🗑️ Cancella Firma</button>
+</div>
+<div class="error-text" id="error-firma-preposto"></div>
+</div>
+<div class="signature-container">
+<label>✍️ Firma Lavoratore:</label>
+<canvas class="signature-canvas" height="150" id="firma-lavoratore" width="300"></canvas>
+<div class="signature-buttons">
+<button class="btn danger" onclick="clearSignature('firma-lavoratore')">🗑️ Cancella Firma</button>
+</div>
+<div class="error-text" id="error-firma-lavoratore"></div>
+</div>
+</div>
+<div style="text-align: center; margin: 30px 0;">
+<button class="btn success scrittura-bloccata" disabled="true" onclick="addToDelivery()">➕ Aggiungi alla consegna</button>
+<button class="btn warning scrittura-bloccata" disabled="true" onclick="saveDelivery()">💾 Salva Consegna</button>
+</div>
+<div id="existing-deliveries" style="display: none;">
+<h3>Consegne precedenti per questo lavoratore:</h3>
+<div id="worker-deliveries-table"></div>
+</div>
+<div class="table-container">
+<table>
+<thead>
+<tr>
+<th>Lavoratore</th>
+<th>DPI</th>
+<th>Codice SAP</th>
+<th>Quantità</th>
+<th>Data</th>
+<th>Motivo</th>
+<th>Firma Preposto</th>
+<th>Firma Lavoratore</th>
+<th>Azioni</th>
+</tr>
+</thead>
+<tbody id="delivery-table-body">
+</tbody>
+</table>
+</div>
+</div>
+<!-- Lavoratori Section -->
+<div class="section" id="lavoratori-section">
+<button class="home-btn" onclick="showSection('home-section')">🏠 Home</button>
+<h2>👥 Gestione Lavoratori</h2>
+<div class="form-grid">
+<div class="form-group">
+<label for="nome">👤 Nome:</label>
+<input id="nome" placeholder="Nome del lavoratore" type="text"/>
+</div>
+<div class="form-group">
+<label for="cognome">👤 Cognome:</label>
+<input id="cognome" placeholder="Cognome del lavoratore" type="text"/>
+</div>
+<div class="form-group">
+<label for="matricola">🆔 Matricola:</label>
+<input id="matricola" placeholder="Matricola del lavoratore" type="text"/>
+</div>
+</div>
+<div class="form-grid">
+<div class="form-group">
+<label for="reparto">🏢 Reparto:</label>
+<input id="reparto" placeholder="Reparto (opzionale)" type="text"/>
+</div>
+<div class="form-group">
+<label for="mansione">💼 Mansione:</label>
+<input id="mansione" placeholder="Mansione (opzionale)" type="text"/>
+</div>
+</div>
+<div style="text-align: center; margin: 30px 0;">
+<button class="btn success scrittura-bloccata" disabled="true" onclick="addWorker()">➕ Aggiungi Lavoratore</button>
+<button class="btn warning" onclick="editWorker()">✏️ Modifica Lavoratore</button>
+<button class="btn danger" onclick="deleteWorker()">🗑️ Cancella Lavoratore</button>
+</div>
+<div class="table-container">
+<table>
+<thead>
+<tr>
+<th>Nome</th>
+<th>Cognome</th>
+<th>Matricola</th>
+<th>Reparto</th>
+<th>Mansione</th>
+<th>Azioni</th>
+</tr>
+</thead>
+<tbody id="workers-table-body">
+</tbody>
+</table>
+</div>
+<div style="margin-top: 30px;">
+<h3>📁 Importa Lavoratori da CSV</h3>
+<div class="form-group">
+<label for="csv-workers">Seleziona file CSV (nome,cognome,matricola,reparto,mansione):</label>
+<input accept=".csv" id="csv-workers" type="file"/>
+</div>
+<button class="btn scrittura-bloccata" disabled="true" onclick="importWorkersCSV()">📥 Importa CSV</button>
+<div id="csv-import-status" style="margin-top: 10px;"></div>
+</div>
+</div>
+<!-- DPI Section -->
+<div class="section" id="dpi-section">
+<button class="home-btn" onclick="showSection('home-section')">🏠 Home</button>
+<h2>🦺 Gestione DPI</h2>
+<div class="form-grid">
+<div class="form-group">
+<label for="nome-dpi">🦺 Nome DPI:</label>
+<input id="nome-dpi" placeholder="Nome del DPI" type="text"/>
+</div>
+<div class="form-group">
+<label for="codice-sap">🏷️ Codice SAP:</label>
+<input id="codice-sap" placeholder="Codice SAP univoco" type="text"/>
+</div>
+</div>
+<div class="form-grid">
+<div class="form-group">
+<label for="categoria">📂 Categoria:</label>
+<select id="categoria">
+<option value="">Seleziona categoria</option>
+<option value="Testa">Testa</option>
+<option value="Occhi">Occhi</option>
+<option value="Udito">Udito</option>
+<option value="Vie Respiratorie">Vie Respiratorie</option>
+<option value="Mani">Mani</option>
+<option value="Corpo">Corpo</option>
+<option value="Piedi">Piedi</option>
+<option value="Anticaduta">Anticaduta</option>
+<option value="Altro">Altro</option>
+</select>
+</div>
+<div class="form-group">
+<label for="scadenza">⏰ Scadenza (mesi):</label>
+<input id="scadenza" placeholder="Durata in mesi (opzionale)" type="number"/>
+</div>
+</div>
+<div class="form-group">
+<label for="note-dpi">📝 Note:</label>
+<input id="note-dpi" placeholder="Note aggiuntive (opzionale)" type="text"/>
+</div>
+<div style="text-align: center; margin: 30px 0;">
+<button class="btn success scrittura-bloccata" disabled="true" onclick="addDPI()">➕ Aggiungi DPI</button>
+<button class="btn warning" onclick="editDPI()">✏️ Modifica DPI</button>
+<button class="btn danger" onclick="deleteDPI()">🗑️ Cancella DPI</button>
+</div>
+<div class="table-container">
+<table>
+<thead>
+<tr>
+<th>Nome</th>
+<th>Codice SAP</th>
+<th>Categoria</th>
+<th>Scadenza (mesi)</th>
+<th>Note</th>
+<th>Azioni</th>
+</tr>
+</thead>
+<tbody id="dpi-table-body">
+</tbody>
+</table>
+</div>
+<div style="margin-top: 30px;">
+<h3>📁 Importa DPI da CSV</h3>
+<div class="form-group">
+<label for="csv-dpi">Seleziona file CSV (nome,codice_sap,categoria,scadenza_mesi,note):</label>
+<input accept=".csv" id="csv-dpi" type="file"/>
+</div>
+<button class="btn scrittura-bloccata" disabled="true" onclick="importDPICSV()">📥 Importa CSV</button>
+<div id="csv-dpi-import-status" style="margin-top: 10px;"></div>
+</div>
+</div>
+<!-- Cerca Section -->
+<div class="section" id="cerca-section">
+<button class="home-btn" onclick="showSection('home-section')">🏠 Home</button>
+<h2>🔍 Cerca</h2>
+<div class="form-grid">
+<div class="form-group">
+<label for="search-type">Tipo di ricerca:</label>
+<select id="search-type" onchange="updateSearchFields()">
+<option value="lavoratori">Lavoratori</option>
+<option value="dpi">DPI</option>
+<option value="consegne">Consegne</option>
+</select>
+</div>
+<div class="form-group">
+<label for="search-term">Termine di ricerca:</label>
+<input id="search-term" placeholder="Inserisci termine di ricerca" type="text"/>
+</div>
+</div>
+<div style="text-align: center; margin: 30px 0;">
+<button class="btn" onclick="performSearch()">🔍 Cerca</button>
+<button class="btn" onclick="showAllDeliveriesInSearch()">📋 Mostra tutte le consegne</button>
+<button class="btn warning" onclick="clearSearch()">🗑️ Pulisci</button>
+</div>
+<div class="table-container" id="search-results" style="display: none;">
+<h3>Risultati della ricerca:</h3>
+<div id="search-results-content"></div>
+<div id="search-actions" style="display: none; margin-top: 20px;">
+<button class="btn danger" onclick="deleteSelectedDeliveries()">🗑️ Cancella selezionate</button>
+</div>
+</div>
+</div>
+<!-- Impostazioni Section -->
+<div class="section" id="impostazioni-section">
+<button class="home-btn" onclick="showSection('home-section')">🏠 Home</button>
+<h2>⚙️ Impostazioni</h2>
+<div class="form-grid">
+<div class="form-group">
+<label for="company-name">🏢 Nome Azienda:</label>
+<input id="company-name" placeholder="Nome dell'azienda" type="text"/>
+</div>
+<div class="form-group">
+<label for="company-logo">🖼️ Logo Azienda:</label>
+<input accept="image/*" id="company-logo" type="file"/>
+</div>
+</div>
+<div class="form-grid">
+<div class="form-group">
+<label>
+<input id="use-logo-print" type="checkbox"/> Usa logo nelle stampe
                     </label>
-                </div>
-                
-                <div class="form-group">
-                    <label>🌙 Modalità Scura:</label>
-                    <label>
-                        <input type="checkbox" id="dark-mode-toggle" onchange="toggleDarkMode()"> Attiva modalità scura
+</div>
+<div class="form-group">
+<label>🌙 Modalità Scura:</label>
+<label>
+<input id="dark-mode-toggle" onchange="toggleDarkMode()" type="checkbox"/> Attiva modalità scura
                     </label>
-                </div>
-            </div>
-            
-            <div style="text-align: center; margin: 30px 0;">
-                <button class="btn success" onclick="saveSettings()">💾 Salva Impostazioni</button>
-                <button class="btn warning" onclick="exportData()">📤 Esporta Dati</button>
-                <button class="btn danger" onclick="importData()">📥 Importa Dati</button>
-            </div>
-            
-            <div style="margin-top: 30px;">
-                <h3>🗑️ Gestione Dati</h3>
-                <button class="btn danger" onclick="clearAllData()">⚠️ Cancella Tutti i Dati</button>
-                <p style="color: #e74c3c; margin-top: 10px;">
+</div>
+</div>
+<div style="text-align: center; margin: 30px 0;">
+<button class="btn success scrittura-bloccata" disabled="true" onclick="saveSettings()">💾 Salva Impostazioni</button>
+<button class="btn warning" onclick="exportData()">📤 Esporta Dati</button>
+<button class="btn danger scrittura-bloccata" disabled="true" onclick="importData()">📥 Importa Dati</button>
+</div>
+<div style="margin-top: 30px;">
+<h3>🗑️ Gestione Dati</h3>
+<button class="btn danger" onclick="clearAllData()">⚠️ Cancella Tutti i Dati</button>
+<p style="color: #e74c3c; margin-top: 10px;">
                     ⚠️ Attenzione: Questa operazione cancellerà tutti i dati salvati!
                 </p>
-            </div>
-        </div>
-
-        <!-- Stampa Section -->
-        <div id="stampa-section" class="section">
-            <button class="home-btn" onclick="showSection('home-section')">🏠 Home</button>
-            <h2>🖨️ Stampa</h2>
-            
-            <div class="form-grid">
-                <div class="form-group">
-                    <label for="search-lavoratore-stampa">👤 Lavoratore (per consegne):</label>
-                    <div class="search-worker-container">
-                        <input type="text" id="search-lavoratore-stampa" class="search-worker-input" placeholder="Cerca per nome, cognome o matricola" oninput="filterWorkers('search-lavoratore-stampa', 'select-lavoratore-stampa')">
-                        <select id="select-lavoratore-stampa" onchange="selectWorkerFromDropdown('search-lavoratore-stampa', 'select-lavoratore-stampa')" style="display: none;">
-                            <option value="">Seleziona lavoratore</option>
-                        </select>
-                        <div id="worker-dropdown-stampa" class="worker-dropdown"></div>
-                    </div>
-                </div>
-                
-                <div class="form-group">
-                    <label for="select-reparto">🏢 Reparto (per lavoratori):</label>
-                    <select id="select-reparto">
-                        <option value="tutti">Tutti i reparti</option>
-                    </select>
-                </div>
-            </div>
-            
-            <div class="form-grid">
-                <div class="form-group">
-                    <label for="data-inizio">📅 Data inizio (opzionale):</label>
-                    <input type="date" id="data-inizio" onchange="updateDeliveryPreview()">
-                </div>
-                
-                <div class="form-group">
-                    <label for="data-fine">📅 Data fine (opzionale):</label>
-                    <input type="date" id="data-fine" onchange="updateDeliveryPreview()">
-                </div>
-            </div>
-            
-            <div style="text-align: center; margin: 30px 0;">
-                <button class="btn" onclick="showAllDeliveries()">📋 Mostra tutte le consegne</button>
-                <button class="btn" onclick="anteprimaPDF('consegne')">📄 Anteprima Consegne DPI</button>
-                <button class="btn" onclick="anteprimaPDF('lavoratori')">👥 Stampa Elenco Lavoratori</button>
-                <button class="btn" onclick="anteprimaPDF('dpi')">🦺 Stampa Elenco DPI</button>
-            </div>
-            
-            <div id="loading" style="display: none;">
-                <p>⏳ Generazione PDF in corso...</p>
-            </div>
-            
-            <div id="statusMessage" class="status-message"></div>
-            
-            <div id="delivery-preview">
-                <h3>Anteprima consegne:</h3>
-                <div class="table-container">
-                    <table id="delivery-preview-table">
-                        <thead>
-                            <tr>
-                                <th><input type="checkbox" id="select-all" onclick="toggleSelectAll()"></th>
-                                <th>Lavoratore</th>
-                                <th>DPI</th>
-                                <th>Codice SAP</th>
-                                <th>Quantità</th>
-                                <th>Data</th>
-                                <th>Motivo</th>
-                                <th>Firma Preposto</th>
-                                <th>Firma Lavoratore</th>
-                            </tr>
-                        </thead>
-                        <tbody id="delivery-preview-content">
-                            <tr>
-                                <td colspan="9">Seleziona un lavoratore o clicca "Mostra tutte le consegne" per visualizzare le consegne.</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- PDF Preview Modal -->
-    <div id="pdf-preview-modal" class="modal">
-        <div class="modal-content">
-            <span class="close" onclick="closePdfPreview()">&times;</span>
-            <h2>Anteprima PDF</h2>
-            <iframe id="pdf-preview-iframe"></iframe>
-            <div style="text-align: center; margin-top: 20px;">
-                <button class="btn success" onclick="confermaStampa()">💾 Salva PDF</button>
-                <button class="btn" onclick="closePdfPreview()">❌ Chiudi</button>
-            </div>
-        </div>
-    </div>
-
-    <script>
+</div>
+</div>
+<!-- Stampa Section -->
+<div class="section" id="stampa-section">
+<button class="home-btn" onclick="showSection('home-section')">🏠 Home</button>
+<h2>🖨️ Stampa</h2>
+<div class="form-grid">
+<div class="form-group">
+<label for="search-lavoratore-stampa">👤 Lavoratore (per consegne):</label>
+<div class="search-worker-container">
+<input class="search-worker-input" id="search-lavoratore-stampa" oninput="filterWorkers('search-lavoratore-stampa', 'select-lavoratore-stampa')" placeholder="Cerca per nome, cognome o matricola" type="text"/>
+<select id="select-lavoratore-stampa" onchange="selectWorkerFromDropdown('search-lavoratore-stampa', 'select-lavoratore-stampa')" style="display: none;">
+<option value="">Seleziona lavoratore</option>
+</select>
+<div class="worker-dropdown" id="worker-dropdown-stampa"></div>
+</div>
+</div>
+<div class="form-group">
+<label for="select-reparto">🏢 Reparto (per lavoratori):</label>
+<select id="select-reparto">
+<option value="tutti">Tutti i reparti</option>
+</select>
+</div>
+</div>
+<div class="form-grid">
+<div class="form-group">
+<label for="data-inizio">📅 Data inizio (opzionale):</label>
+<input id="data-inizio" onchange="updateDeliveryPreview()" type="date"/>
+</div>
+<div class="form-group">
+<label for="data-fine">📅 Data fine (opzionale):</label>
+<input id="data-fine" onchange="updateDeliveryPreview()" type="date"/>
+</div>
+</div>
+<div style="text-align: center; margin: 30px 0;">
+<button class="btn" onclick="showAllDeliveries()">📋 Mostra tutte le consegne</button>
+<button class="btn" onclick="anteprimaPDF('consegne')">📄 Anteprima Consegne DPI</button>
+<button class="btn" onclick="anteprimaPDF('lavoratori')">👥 Stampa Elenco Lavoratori</button>
+<button class="btn" onclick="anteprimaPDF('dpi')">🦺 Stampa Elenco DPI</button>
+</div>
+<div id="loading" style="display: none;">
+<p>⏳ Generazione PDF in corso...</p>
+</div>
+<div class="status-message" id="statusMessage"></div>
+<div id="delivery-preview">
+<h3>Anteprima consegne:</h3>
+<div class="table-container">
+<table id="delivery-preview-table">
+<thead>
+<tr>
+<th><input id="select-all" onclick="toggleSelectAll()" type="checkbox"/></th>
+<th>Lavoratore</th>
+<th>DPI</th>
+<th>Codice SAP</th>
+<th>Quantità</th>
+<th>Data</th>
+<th>Motivo</th>
+<th>Firma Preposto</th>
+<th>Firma Lavoratore</th>
+</tr>
+</thead>
+<tbody id="delivery-preview-content">
+<tr>
+<td colspan="9">Seleziona un lavoratore o clicca "Mostra tutte le consegne" per visualizzare le consegne.</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+</div>
+<!-- PDF Preview Modal -->
+<div class="modal" id="pdf-preview-modal">
+<div class="modal-content">
+<span class="close" onclick="closePdfPreview()">×</span>
+<h2>Anteprima PDF</h2>
+<iframe id="pdf-preview-iframe"></iframe>
+<div style="text-align: center; margin-top: 20px;">
+<button class="btn success scrittura-bloccata" disabled="true" onclick="confermaStampa()">💾 Salva PDF</button>
+<button class="btn" onclick="closePdfPreview()">❌ Chiudi</button>
+</div>
+</div>
+</div>
+<script>
         // Variabili globali
         let currentPdfDoc = null;
         let currentPdfName = '';
@@ -2979,5 +2926,39 @@
             }, 500);
         });
     </script>
+
+<div style="margin-top: 1em; text-align: center;">
+<button onclick="sbloccaScrittura()" style="background-color: #28a745; color: white; padding: 10px 20px; font-size: 16px; border-radius: 8px; margin-right: 10px;">🔓 Sblocca Scrittura</button>
+<button onclick="cambiaPIN()" style="background-color: #ffc107; color: black; padding: 10px 20px; font-size: 16px; border-radius: 8px;">🔑 Cambia PIN</button>
+</div>
+
+<script>
+let pinScrittura = localStorage.getItem('pinScrittura') || '1234';
+window.scritturaAbilitata = false;
+
+function sbloccaScrittura() {
+  const pinInserito = prompt("Inserisci il PIN per abilitare la scrittura:");
+  if (pinInserito === pinScrittura) {
+    alert("✅ Scrittura abilitata!");
+    window.scritturaAbilitata = true;
+    document.querySelectorAll('.scrittura-bloccata').forEach(el => el.disabled = false);
+  } else {
+    alert("❌ PIN errato.");
+  }
+}
+
+function cambiaPIN() {
+  const attuale = prompt("Inserisci il PIN attuale:");
+  if (attuale !== pinScrittura) return alert("❌ PIN errato.");
+  const nuovo = prompt("Nuovo PIN:");
+  if (nuovo && nuovo.length >= 4) {
+    pinScrittura = nuovo;
+    localStorage.setItem('pinScrittura', nuovo);
+    alert("🔐 PIN modificato!");
+  } else {
+    alert("⚠️ PIN non valido.");
+  }
+}
+</script>
 </body>
 </html>
